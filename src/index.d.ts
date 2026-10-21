@@ -21,6 +21,6 @@ declare class SamJs {
   wav(text: string, phonetic?: boolean): Uint8Array;
 }
 
-declare module "sam-js" {
+declare module "ru-sam" {
   export = SamJs;
 }

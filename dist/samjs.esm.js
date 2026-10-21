@@ -1,10 +1,12 @@
 /**
- * This is SamJs.js v0.3.1
+ * This is СЭМ (ru-sam) v0.1.0
  *
- * A Javascript port of "SAM Software Automatic Mouth".
+ * The russian version of "SAM Software Automatic Mouth".
  *
+ * Based on SamJs.js, a Javascript port of SAM:
  * (c) 2017-2026 Christian Schiffler
  *
+ * @link(https://github.com/dennispronin/ru_sam)
  * @link(https://github.com/discordier/sam)
  *
  * @author 2017 Christian Schiffler <c.schiffler@cyberspectrum.de>

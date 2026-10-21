@@ -1,8 +1,8 @@
 {
-  "name": "sam-js",
-  "version": "0.3.1",
-  "description": "SAM - The Software Automatic Mouth",
-  "author": "Christian Schiffler <c.schiffler@cyberspectrum.de>",
+  "name": "ru-sam",
+  "version": "0.1.0",
+  "description": "СЭМ - the russian Software Automatic Mouth",
+  "author": "Denis Pronin",
   "private": false,
   "main": "dist/samjs.min.js",
   "module": "dist/samjs.esm.min.js",
@@ -60,17 +60,22 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/discordier/sam.git"
+    "url": "git+https://github.com/dennispronin/ru_sam.git"
   },
   "keywords": [
     "speech",
     "synthesis",
     "retro",
-    "c64"
+    "c64",
+    "russian",
+    "tts"
   ],
   "license": "SEE LICENSE IN README.md",
   "bugs": {
-    "url": "https://github.com/discordier/sam/issues"
+    "url": "https://github.com/dennispronin/ru_sam/issues"
   },
-  "homepage": "https://github.com/discordier/sam#readme"
+  "homepage": "https://github.com/dennispronin/ru_sam#readme",
+  "contributors": [
+    "Christian Schiffler <c.schiffler@cyberspectrum.de>"
+  ]
 }

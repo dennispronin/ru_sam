@@ -18,10 +18,9 @@ node_modules:
 	yarn install --frozen-lockfile
 
 .PHONY: release-docs
-release-docs: gh-pages build $(PROJECT_DIR)/dist/samjs.min.js $(PROJECT_DIR)/dist/guessnum.min.js
-	cp $(PROJECT_DIR)/dist/samjs.min.js \
-		$(PROJECT_DIR)/dist/guessnum.min.js \
-		$(GH_PAGES_PATH)/dist
+release-docs: gh-pages build $(PROJECT_DIR)/dist/samjs.min.js
+	cp $(PROJECT_DIR)/dist/samjs.min.js $(GH_PAGES_PATH)/dist
+	cp $(PROJECT_DIR)/index.html $(GH_PAGES_PATH)/index.html
 	git -C $(GH_PAGES_PATH) add .
 	git -C $(GH_PAGES_PATH) commit -m "update release"
 

@@ -1,91 +1,178 @@
-# SAM Software Automatic Mouth
+# СЭМ — Software Automatic Mouth по-русски
 
-## What is SAM?
+## Что это
 
-This is a vanilla Javascript port of the Text-To-Speech (TTS) software
-SAM (Software Automatic Mouth) for the Commodore C64 published in the
-year 1982 by Don't Ask Software (now SoftVoice, Inc.).
+СЭМ — это русская версия SAM (Software Automatic Mouth), очень маленькой
+программы синтеза речи для Commodore C64, выпущенной в 1982 году фирмой
+Don't Ask Software (сейчас SoftVoice, Inc.).
 
-It is based on the adaption to C by
-[Stefan Macke](https://github.com/s-macke/SAM)
-and the refactorings by 
-[Vidar Hokstad](https://github.com/vidarh/SAM) and
-[8BitPimp](https://github.com/8BitPimp/SAM)
+Проект является форком [discordier/sam](https://github.com/discordier/sam)
+— переноса SAM на Javascript, сделанного Кристианом Шиффлером. Живую
+демонстрацию оригинала можно послушать на
+[discordier.github.io/sam](https://discordier.github.io/sam/).
 
-It includes a Text-To-Phoneme converter called reciter and a
-Phoneme-To-Speech routine for the final output.
+**Голос здесь — в точности голос оригинального SAM.** Синтезатор
+(`src/renderer`), разборщик фонем (`src/parser`) и все их таблицы формант
+не менялись вообще. По-русски СЭМ говорит только за счёт нового набора
+правил «текст → фонемы» (`src/reciter/tables-ru.es6`), который раскладывает
+русские звуки по уже существующим аллофонам SAM.
 
-It aims for low memory impact and file size which is the reason I want
-to avoid the 
-[Emscripten conversion](http://simulationcorner.net/index.php?page=sam)
-by Stefan (which weights about 414kb).
-
-For further details, refer to
-[retrobits.net](http://www.retrobits.net/atari/sam.shtml)
-
-Some analytics of S.A.M. in general can be found in Artyom Skrobov's
-(@tyomitch) blog who also provided pretty insightful PRs.
-Visit his blog https://habr.com/ru/post/500764/ (russian)
-or the google translated version
-[here](https://habr-com.translate.goog/ru/post/500764/?_x_tr_sl=auto&_x_tr_tl=en).
-
-## Usage
-
-Require the module via yarn: `yarn add sam-js`
-
-Use it in your program:
+## Использование
 
 ```javascript
-import SamJs from 'sam-js';
+import SamJs from 'ru-sam';
 
 let sam = new SamJs();
 
-// Play "Hello world" over the speaker.
-// This returns a Promise resolving after playback has finished.
-sam.speak('Hello world');
+// Произнести «Привет» через динамики.
+// Возвращает Promise, который разрешается после окончания проигрывания.
+sam.speak('Прив+ет');
 
-// Generate a wave file containing "Hello world" and download it.
-sam.download('Hello world');
+// Сохранить «Привет» в wav-файл и скачать его.
+sam.download('Прив+ет');
 
-// Render the passed text as 8bit wave buffer array (Uint8Array).
-const buf8 = sam.buf8('Hello world');
+// Получить результат как 8-битный буфер (Uint8Array).
+const buf8 = sam.buf8('Прив+ет');
 
-// Render the passed text as 32bit wave buffer array (Float32Array).
-const buf32 = sam.buf32('Hello world');
+// Получить результат как 32-битный буфер (Float32Array).
+const buf32 = sam.buf32('Прив+ет');
 ```
 
-### Typical voice values
+Английский reciter остался на месте и доступен отдельно:
 
-```
-DESCRIPTION          SPEED     PITCH     THROAT    MOUTH
-Elf                   72        64        110       160
-Little Robot          92        60        190       190
-Stuffy Guy            82        72        110       105
-Little Old Lady       82        32        145       145
-Extra-Terrestrial    100        64        150       200
-SAM                   72        64        128       128
+```javascript
+import {TextToPhonemes} from 'ru-sam/src/reciter/reciter-en.es6';
 ```
 
-## Original docs.
+## Ударение
 
-I have bundled a copy of the original manual in this repository, see
-the [manual](docs/manual.md) file in the [docs](docs) directory.
+Ударение в русском языке лексическое, по правилам его не вывести, а без
+него нельзя правильно редуцировать гласные. Поэтому его можно поставить
+вручную — двумя способами, на выбор:
 
-## License
+| Запись      | Как  |
+|-------------|------|
+| `прив+ет`   | знак `+` перед гласной |
+| `приве́т`    | знак акута (U+0301) над гласной |
 
-The software is a reverse-engineered version of a commercial software
-published more than 30 years ago. The current copyright holder is 
-SoftVoice, Inc. (www.text2speech.com)
+Буква `ё` всегда считается ударной, помечать её не нужно.
 
-Any attempt to contact the company failed. The website was last
-updated in the year 2009. The status of the original
-software can therefore best described as Abandonware
-(http://en.wikipedia.org/wiki/Abandonware)
+Слово **без** пометы читается с полными, нередуцированными гласными — так
+оно звучит чуть ровнее, но никогда не звучит неправильно:
 
-As long this is the case I cannot put my code under any specific open
-source software license Use it at your own risk.
+```
+прив+ет   ->  PRYIHVYEH4T     (ударение учтено)
+привет    ->  PRYIHVYEHT      (обе гласные полные)
+молок+о   ->  MAXLAHKOH4      [мəлɐк'о]
+г+ород    ->  GOH4RAXT        [г'орət], с оглушением на конце
+```
 
-Contact
+## Что умеют правила
 
-If you have questions don' t hesitate to ask me. If you discovered some
-new knowledge about the code please file an issue.
+* редукция гласных до и после ударения (`молок+о`, `к+омната`);
+* смягчение согласных перед `е ё и ю я ь` (`нет`, `пять`, `день`);
+* озвончение и оглушение, в том числе по цепочке в конечном
+  стечении (`сдать`, `сказка`, `дуб`, `всё`, `подъезд`);
+* непроизносимые согласные в `стн`, `здн`, `вств`, `лнц`
+  (`честный`, `поздно`, `чувство`, `солнце`);
+* окончания `-ого`/`-его` как `-ово`/`-ево`, с исключениями
+  (`красного`, но `много`);
+* `-тся`/`-ться` как `-цца` (`учится`);
+* `что` и `конечно` через `ш`;
+* `и` после `ж ш ц` как `ы` (`жить`);
+* `нк`/`нг` через заднеязычный `NX` (`банк`);
+* латиница транслитерируется, так что смешанный текст не ломает разбор.
+
+## Соответствие звуков
+
+| Русский | SAM | | Русский | SAM |
+|---|---|---|---|---|
+| б п д т г к в ф з с | `B P D T G K V F Z S` | | а о у э и | `AA OH UW EH IY` |
+| ж ш ч | `ZH SH CH` | | безударные | `AH AX UH EH IH` |
+| м н | `M N`, `NX` перед к/г | | я е ё ю | `AE EH OH UW` + `Y` |
+| л р й | `L R Y` | | ы | `IH` |
+| х | `/X` | | мягкие согласные | согласный + `Y` |
+| ц | `TS` | | щ | `SHSH` |
+
+## Что сделано приближённо
+
+Звуки, которых у SAM просто нет, собраны в блоке `TUNE` в начале
+`src/reciter/tables-ru.es6`, чтобы их можно было менять, не трогая правила:
+
+* **ы** — своего звука нет вообще, сейчас берётся `IH`
+  (другие варианты: `IX`, `UX`, `ER`, `UH`);
+* **х** — `/X` (альтернатива `/H`);
+* **р** — `R`, английский (альтернатива `DX`, одноударный);
+* **щ** — долгое `SHSH` (альтернатива `SH`).
+
+Известные огрубления:
+
+* редукция видит окно примерно в два слога от ударения; что дальше —
+  остаётся полным гласным;
+* безударное конечное `-я` сокращается до `AX` без пометы, потому что
+  так оно встречается гораздо чаще (`дядя`, `время`); у слов вроде
+  `земля` ударение нужно ставить;
+* цифры читаются по одной (`123` → «один два три»), как и в оригинале.
+
+## Типичные голоса
+
+```
+ОПИСАНИЕ         СКОРОСТЬ  ТОН    ГОРЛО   РОТ
+Эльф                72      64     110    160
+Робот               92      60     190    190
+Зануда              82      72     110    105
+Старушка            82      32     145    145
+Пришелец           100      64     150    200
+СЭМ                 72      64     128    128
+```
+
+## Сборка
+
+```bash
+yarn install
+yarn test     # шесть наборов: пять английских плюс русский (t-6)
+yarn build
+```
+
+Страница публикуется в ветку `gh-pages`, как и в оригинале:
+
+```bash
+make release-docs
+```
+
+## Благодарности
+
+* [Кристиан Шиффлер](https://github.com/discordier) — перенос SAM на
+  Javascript и внешний вид демонстрационной страницы, на которых основан
+  этот проект;
+* [Себастьян Макке](https://github.com/s-macke/SAM) — исходники на C;
+* [Видар Хокстад](https://github.com/vidarh/SAM) и
+  [8BitPimp](https://github.com/8BitPimp/SAM) — их переработка;
+* Артём Скробов (@tyomitch) — разбор внутренностей SAM на Хабре:
+  [habr.com/ru/articles/500764](https://habr.com/ru/articles/500764/).
+
+## Оригинальная документация
+
+Копия оригинального руководства лежит в этом репозитории:
+[manual](docs/manual.md) в каталоге [docs](docs).
+
+## Лицензия
+
+Условия те же, что и у проекта, от которого сделан форк. Ниже — исходная
+формулировка автора:
+
+> The software is a reverse-engineered version of a commercial software
+> published more than 30 years ago. The current copyright holder is
+> SoftVoice, Inc. (www.text2speech.com)
+>
+> Any attempt to contact the company failed. The website was last
+> updated in the year 2009. The status of the original
+> software can therefore best described as Abandonware
+> (http://en.wikipedia.org/wiki/Abandonware)
+>
+> As long this is the case I cannot put my code under any specific open
+> source software license Use it at your own risk.
+
+Иными словами: оригинальный SAM — брошенное ПО, права на него
+принадлежат SoftVoice, Inc., и выпустить этот код под какой-либо
+конкретной открытой лицензией нельзя. Используйте на свой риск.

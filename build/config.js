@@ -5,12 +5,14 @@ const version = process.env.VERSION || require('../package.json').version;
 
 const banner =
   '/**\n' +
-  ' * This is SamJs.js v' + version + '\n' +
+  ' * This is \u0421\u042d\u041c (ru-sam) v' + version + '\n' +
   ' *\n' +
-  ' * A Javascript port of "SAM Software Automatic Mouth".\n' +
+  ' * The russian version of "SAM Software Automatic Mouth".\n' +
   ' *\n' +
+  ' * Based on SamJs.js, a Javascript port of SAM:\n' +
   ' * (c) 2017-' + new Date().getFullYear() + ' Christian Schiffler\n' +
   ' *\n' +
+  ' * @link(https://github.com/dennispronin/ru_sam)\n' +
   ' * @link(https://github.com/discordier/sam)\n' +
   ' *\n' +
   ' * @author 2017 Christian Schiffler <c.schiffler@cyberspectrum.de>\n' +
