@@ -1,0 +1,278 @@
+[
+    {
+        "input": "прив+ет",
+        "output": " PRYIHVYEH4T"
+    },
+    {
+        "input": "привет",
+        "output": " PRYIHVYEHT"
+    },
+    {
+        "input": "приве́т",
+        "output": " PRYIHVYEH4T"
+    },
+    {
+        "input": "молок+о",
+        "output": " MAXLAHKOH4"
+    },
+    {
+        "input": "г+ород",
+        "output": " GOH4RAXT"
+    },
+    {
+        "input": "б+абушка",
+        "output": " BAA4BUHSHKAX"
+    },
+    {
+        "input": "к+омната",
+        "output": " KOH4MNAXTAX"
+    },
+    {
+        "input": "соб+ака",
+        "output": " SAHBAA4KAX"
+    },
+    {
+        "input": "спас+ибо",
+        "output": " SPAHSYIY4BAX"
+    },
+    {
+        "input": "хорош+о",
+        "output": " /XAXRAHSHOH4"
+    },
+    {
+        "input": "москв+а",
+        "output": " MAHSKVAA4"
+    },
+    {
+        "input": "к+ошка",
+        "output": " KOH4SHKAX"
+    },
+    {
+        "input": "нет",
+        "output": " NYEHT"
+    },
+    {
+        "input": "пять",
+        "output": " PYAETY"
+    },
+    {
+        "input": "день",
+        "output": " DYEHNY"
+    },
+    {
+        "input": "мать",
+        "output": " MAATY"
+    },
+    {
+        "input": "царь",
+        "output": " TSAARY"
+    },
+    {
+        "input": "книга",
+        "output": " KNYIHGAA"
+    },
+    {
+        "input": "три",
+        "output": " TRYIH"
+    },
+    {
+        "input": "семья",
+        "output": " SYEHMYAA"
+    },
+    {
+        "input": "земл+я",
+        "output": " ZYIHMLYAE4"
+    },
+    {
+        "input": "жить",
+        "output": " ZHIHTY"
+    },
+    {
+        "input": "рыба",
+        "output": " RIHBAA"
+    },
+    {
+        "input": "сыр",
+        "output": " SIHR"
+    },
+    {
+        "input": "цена",
+        "output": " TSEHNAA"
+    },
+    {
+        "input": "шесть",
+        "output": " SHEHSTY"
+    },
+    {
+        "input": "сдать",
+        "output": " ZDAATY"
+    },
+    {
+        "input": "сказка",
+        "output": " SKAASKAA"
+    },
+    {
+        "input": "дуб",
+        "output": " DUWP"
+    },
+    {
+        "input": "всё",
+        "output": " FSYOH4"
+    },
+    {
+        "input": "год",
+        "output": " GOHT"
+    },
+    {
+        "input": "подъезд",
+        "output": " POHDYEHST"
+    },
+    {
+        "input": "юг",
+        "output": " YUWK"
+    },
+    {
+        "input": "поздно",
+        "output": " POHZNOH"
+    },
+    {
+        "input": "честный",
+        "output": " CHEHSNIHY"
+    },
+    {
+        "input": "чувство",
+        "output": " CHUWSTVOH"
+    },
+    {
+        "input": "солнце",
+        "output": " SOHNTSEH"
+    },
+    {
+        "input": "здравствуйте",
+        "output": " ZDRAASTVUWYTYEH"
+    },
+    {
+        "input": "что",
+        "output": " SHTOH4"
+    },
+    {
+        "input": "конечно",
+        "output": " KOHNYEHSHNOH"
+    },
+    {
+        "input": "красного",
+        "output": " KRAASNOHVOH"
+    },
+    {
+        "input": "много",
+        "output": " MNOHGOH"
+    },
+    {
+        "input": "его",
+        "output": " YEHVOH"
+    },
+    {
+        "input": "учится",
+        "output": " UWCHIHTSAX"
+    },
+    {
+        "input": "мыться",
+        "output": " MIHTSAX"
+    },
+    {
+        "input": "ёлка",
+        "output": " YOH4LKAX"
+    },
+    {
+        "input": "язык",
+        "output": " YAAZIHK"
+    },
+    {
+        "input": "объявление",
+        "output": " OHBYAAVLYEHNYIHYEH"
+    },
+    {
+        "input": "Росс+ия",
+        "output": " RAHSYIY4YAX"
+    },
+    {
+        "input": "дядя",
+        "output": " DYAEDYAX"
+    },
+    {
+        "input": "юла",
+        "output": " YUWLAA"
+    },
+    {
+        "input": "щука",
+        "output": " SHSHUWKAA"
+    },
+    {
+        "input": "банк",
+        "output": " BAANXK"
+    },
+    {
+        "input": "хорошо",
+        "output": " /XOHROHSHOH"
+    },
+    {
+        "input": "вода",
+        "output": " VOHDAA"
+    },
+    {
+        "input": "окно",
+        "output": " OHKNOH"
+    },
+    {
+        "input": "стол",
+        "output": " STOHL"
+    },
+    {
+        "input": "фильм",
+        "output": " FYIHLYM"
+    },
+    {
+        "input": "эхо",
+        "output": " EH/XOH"
+    },
+    {
+        "input": "1",
+        "output": "  AHDIY4N"
+    },
+    {
+        "input": "2",
+        "output": "  DVAA4"
+    },
+    {
+        "input": "3",
+        "output": "  TRIY4"
+    },
+    {
+        "input": "0",
+        "output": "  NOHLY"
+    },
+    {
+        "input": "5",
+        "output": "  PYAE4TY"
+    },
+    {
+        "input": "тест, раз.",
+        "output": " TYEHST, RAAS."
+    },
+    {
+        "input": "да!",
+        "output": " DAA."
+    },
+    {
+        "input": "что?",
+        "output": " SHTOH4?"
+    },
+    {
+        "input": "SAM",
+        "output": " SAAM"
+    },
+    {
+        "input": "test",
+        "output": " TYEHST"
+    }
+]
