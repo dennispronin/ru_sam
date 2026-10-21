@@ -1,9 +1,12 @@
 import {PlayBuffer, RenderBuffer} from './util/player.es6'
-import {TextToPhonemes} from './reciter/reciter.es6';
+import {CreateReciter} from './reciter/reciter.es6';
+import * as russianTables from './reciter/tables-ru.es6';
 import {SamProcess, SamBuffer} from './sam/sam.es6';
 import { ToWavBuffer } from './util/player.es6';
 
-const convert = TextToPhonemes;
+// СЭМ speaks russian - the english reciter is still available by building one
+// from './reciter/tables.es6' instead.
+const convert = CreateReciter(russianTables);
 const buf8 = SamProcess;
 const buf32 = SamBuffer;
 

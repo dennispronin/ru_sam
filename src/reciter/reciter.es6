@@ -1,4 +1,4 @@
-import * as tables from './tables.es6';
+import * as englishTables from './tables.es6';
 
 import {
   FLAG_NUMERIC,
@@ -10,6 +10,32 @@ import {
   FLAG_VOWEL_OR_Y,
   FLAG_ALPHA_OR_QUOT
 } from './constants.es6'
+
+/**
+ * Build a reciter (text to phoneme converter) for a given language table.
+ *
+ * The rule engine itself is language agnostic, all language knowledge lives in
+ * the passed table module. Beside the actual `charFlags`, `rules` and `rules2`
+ * a table may override the few character classes the original (english) code
+ * had hardcoded:
+ *
+ *  - `plusChars`  the characters matched by the '+' rule operator.
+ *  - `atChar` / `atCheckChars` the exception handling of the '@' rule operator.
+ *  - `ampersandPrefixDigraphs` / `ampersandSuffixDigraphs` the digraphs
+ *    accepted by the '&' rule operator in addition to the flag check.
+ *
+ * Omitting them keeps the original english behaviour.
+ *
+ * @param {object} tables The language table module.
+ *
+ * @return {function} The TextToPhonemes function for that language.
+ */
+export const CreateReciter = (tables) => {
+  const plusChars = tables.plusChars || ['E', 'I', 'Y'];
+  const atChar = (tables.atChar !== undefined) ? tables.atChar : 'H';
+  const atCheckChars = tables.atCheckChars || ['T', 'C', 'S'];
+  const ampersandPrefixDigraphs = tables.ampersandPrefixDigraphs || ['CH', 'SH'];
+  const ampersandSuffixDigraphs = tables.ampersandSuffixDigraphs || ['HC', 'HS'];
 
 /**
  * Test if the char matches against the flags in the reciter table.
@@ -68,8 +94,8 @@ const reciterRule = (ruleString) => {
     post = tmp[1]
   ;
 
-  const TCS = ['T', 'C', 'S'];
-  const EIY = ['E', 'I', 'Y'];
+  const TCS = atCheckChars;
+  const EIY = plusChars;
 
   /**
    * Test if the rule prefix matches.
@@ -89,7 +115,7 @@ const reciterRule = (ruleString) => {
           // '.' - unknown?
           '.': () => flagsAt(text, --pos, FLAG_0X08),
           // '&' - previous char must be a diphthong or previous chars must be 'CH' or 'SH'
-          '&': () => (flagsAt(text, --pos, FLAG_DIPHTHONG)) || (isOneOf(text.substr(--pos, 2), ['CH', 'SH'])),
+          '&': () => (flagsAt(text, --pos, FLAG_DIPHTHONG)) || (isOneOf(text.substr(--pos, 2), ampersandPrefixDigraphs)),
           // '@' - previous char must be voiced and not 'H'.
           '@': () => {
             if (flagsAt(text, --pos, FLAG_VOICED)) {
@@ -97,7 +123,7 @@ const reciterRule = (ruleString) => {
             }
             const inputChar = text[pos];
             // 'H'
-            if (inputChar !== 'H')
+            if (inputChar !== atChar)
               return false;
             // FIXME: this is always true?!? is there a "--pos" missing in original code?
             // Check for 'T', 'C', 'S'
@@ -154,14 +180,14 @@ const reciterRule = (ruleString) => {
           // '.' - unknown?
           '.': () => flagsAt(text, ++pos, FLAG_0X08),
           // '&' - next char must be a diphthong or next chars must be 'HC' or 'HS'
-          '&': () => flagsAt(text, ++pos, FLAG_DIPHTHONG) || isOneOf(text.substr((++pos) - 2, 2), ['HC', 'HS']),
+          '&': () => flagsAt(text, ++pos, FLAG_DIPHTHONG) || isOneOf(text.substr((++pos) - 2, 2), ampersandSuffixDigraphs),
           // '@' - next char must be voiced and not 'H'.
           '@': () => {
             if (flagsAt(text, ++pos, FLAG_VOICED)) {
               return true;
             }
             const inputChar = text[pos];
-            if (inputChar !== 'H') // 'H'
+            if (inputChar !== atChar) // 'H'
               return false;
             // Check for 'T', 'C', 'S'
             if (!isOneOf(inputChar, TCS))
@@ -298,8 +324,8 @@ const rules2 = tables.rules2.split('|').map(reciterRule);
  *
  * @return {boolean|string}
  */
-export const TextToPhonemes = (input) => {
-  const text = ' ' + input.toUpperCase();
+const TextToPhonemes = (input) => {
+  const text = ' ' + (tables.normalize ? tables.normalize(input) : input.toUpperCase());
 
   let inputPos = 0, output = '';
   /**
@@ -359,3 +385,15 @@ export const TextToPhonemes = (input) => {
   }
   return output;
 };
+
+  return TextToPhonemes;
+};
+
+/**
+ * Convert english text to a phoneme string.
+ *
+ * @param {string} input The input string to convert.
+ *
+ * @return {boolean|string}
+ */
+export const TextToPhonemes = CreateReciter(englishTables);
