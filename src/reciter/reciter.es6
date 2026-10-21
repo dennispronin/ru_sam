@@ -1,5 +1,3 @@
-import * as englishTables from './tables.es6';
-
 import {
   FLAG_NUMERIC,
   FLAG_RULESET2,
@@ -388,12 +386,3 @@ const TextToPhonemes = (input) => {
 
   return TextToPhonemes;
 };
-
-/**
- * Convert english text to a phoneme string.
- *
- * @param {string} input The input string to convert.
- *
- * @return {boolean|string}
- */
-export const TextToPhonemes = CreateReciter(englishTables);

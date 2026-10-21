@@ -1,9 +1,9 @@
 /**
- * This is SamJs.js v0.3.0
+ * This is SamJs.js v0.3.1
  *
  * A Javascript port of "SAM Software Automatic Mouth".
  *
- * (c) 2017-2024 Christian Schiffler
+ * (c) 2017-2026 Christian Schiffler
  *
  * @link(https://github.com/discordier/sam)
  *
@@ -193,27 +193,452 @@ let RenderBuffer = audiobuffer => {
   url.revokeObjectURL(fileURL);
 };
 
+let FLAG_NUMERIC = 0x01;
+let FLAG_RULESET2 = 0x02;
+let FLAG_VOICED$1 = 0x04; // FIXME: is this correct?
+let FLAG_0X08 = 0x08; // unknown.
+let FLAG_DIPHTHONG$1 = 0x10; // FIXME: is this correct?
+let FLAG_CONSONANT$1 = 0x20; // FIXME: is this correct?
+let FLAG_VOWEL_OR_Y = 0x40;
+let FLAG_ALPHA_OR_QUOT = 0x80;
+
+/**
+ * Build a reciter (text to phoneme converter) for a given language table.
+ *
+ * The rule engine itself is language agnostic, all language knowledge lives in
+ * the passed table module. Beside the actual `charFlags`, `rules` and `rules2`
+ * a table may override the few character classes the original (english) code
+ * had hardcoded:
+ *
+ *  - `plusChars`  the characters matched by the '+' rule operator.
+ *  - `atChar` / `atCheckChars` the exception handling of the '@' rule operator.
+ *  - `ampersandPrefixDigraphs` / `ampersandSuffixDigraphs` the digraphs
+ *    accepted by the '&' rule operator in addition to the flag check.
+ *
+ * Omitting them keeps the original english behaviour.
+ *
+ * @param {object} tables The language table module.
+ *
+ * @return {function} The TextToPhonemes function for that language.
+ */
+let CreateReciter = tables => {
+  let plusChars = tables.plusChars || ['E', 'I', 'Y'];
+  let atChar = tables.atChar !== undefined ? tables.atChar : 'H';
+  let atCheckChars = tables.atCheckChars || ['T', 'C', 'S'];
+  let ampersandPrefixDigraphs = tables.ampersandPrefixDigraphs || ['CH', 'SH'];
+  let ampersandSuffixDigraphs = tables.ampersandSuffixDigraphs || ['HC', 'HS'];
+
+  /**
+   * Test if the char matches against the flags in the reciter table.
+   * @param {string} c
+   * @param {Number} flg
+   * @return {boolean}
+   */
+  let flags = (c, flg) => {
+    return (tables.charFlags[c] & flg) !== 0;
+  };
+
+  /**
+   *
+   * @param {string} text
+   * @param {Number} pos
+   * @param {Number} flg
+   * @return {boolean}
+   */
+  let flagsAt = (text, pos, flg) => {
+    return flags(text[pos], flg);
+  };
+  /**
+   *
+   * @param {string} c
+   * @param {Array} list
+   *
+   * @return {boolean}
+   */
+  let isOneOf = (c, list) => {
+    return list.indexOf(c) !== -1;
+  };
+
+  /**
+   * Set a phoneme in the buffer.
+   *
+   * @callback successCallback
+   *
+   * @param {string} append    The string to append.
+   * @param {Number} inputSkip The amount or chars to move ahead in the input.
+   */
+
+  /**
+   * Generator for self processing rule instances.
+   * @param {String} ruleString 'xxx(yyy)zzz=foobar' 'xxx(yyy)zzz' is the source value, 'foobar' is the destination value.
+   * @return {result}
+   */
+  let reciterRule = ruleString => {
+    let splitted = ruleString.split('=');
+    const
+      // Must pop and join here because of rule for '=' itself.
+      target = splitted.pop(),
+      source = splitted.join('=').split('('),
+      tmp = source.pop().split(')'),
+      pre = source[0],
+      match = tmp[0],
+      post = tmp[1];
+    let TCS = atCheckChars;
+    let EIY = plusChars;
+
+    /**
+     * Test if the rule prefix matches.
+     * @param {string} text The input text.
+     * @param {Number} pos  The input position we are working from.
+     * @return {boolean}
+     */
+    let checkPrefix = (text, pos) => {
+      for (let rulePos = pre.length - 1; rulePos > -1; rulePos--) {
+        let ruleByte = pre[rulePos];
+        if (!flags(ruleByte, FLAG_ALPHA_OR_QUOT)) {
+          if (!{
+            // '' - previous char must not be alpha or quotation mark.
+            ' ': () => !flagsAt(text, --pos, FLAG_ALPHA_OR_QUOT),
+            // '#' - previous char must be a vowel or Y.
+            '#': () => flagsAt(text, --pos, FLAG_VOWEL_OR_Y),
+            // '.' - unknown?
+            '.': () => flagsAt(text, --pos, FLAG_0X08),
+            // '&' - previous char must be a diphthong or previous chars must be 'CH' or 'SH'
+            '&': () => flagsAt(text, --pos, FLAG_DIPHTHONG$1) || isOneOf(text.substr(--pos, 2), ampersandPrefixDigraphs),
+            // '@' - previous char must be voiced and not 'H'.
+            '@': () => {
+              if (flagsAt(text, --pos, FLAG_VOICED$1)) {
+                return true;
+              }
+              let inputChar = text[pos];
+              // 'H'
+              if (inputChar !== atChar) return false;
+              // FIXME: this is always true?!? is there a "--pos" missing in original code?
+              // Check for 'T', 'C', 'S'
+              if (!isOneOf(inputChar, TCS)) {
+                return false;
+              }
+              {
+                throw new Error('Is always false but happened? ' + inputChar);
+              }
+            },
+            // '^' - previous char must be a consonant.
+            '^': () => flagsAt(text, --pos, FLAG_CONSONANT$1),
+            // '+' - previous char must be either 'E', 'I' or 'Y'.
+            '+': () => isOneOf(text[--pos], EIY),
+            // ':' - walk left in input position until we hit a non consonant or begin of string.
+            ':': () => {
+              while (pos >= 0) {
+                if (!flagsAt(text, pos - 1, FLAG_CONSONANT$1)) break;
+                pos--;
+              }
+              return true;
+            }
+          }[ruleByte]()) {
+            return false;
+          }
+        }
+        // Rule char does not match.
+        else if (text[--pos] !== ruleByte) {
+          return false;
+        }
+      }
+      return true;
+    };
+
+    /**
+     * Test if the rule suffix matches.
+     * @param {string} text The input text.
+     * @param {Number} pos  The input position we are working from.
+     * @return {boolean}
+     */
+    let checkSuffix = (text, pos) => {
+      for (let rulePos = 0; rulePos < post.length; rulePos++) {
+        let ruleByte = post[rulePos];
+        // do we have to handle the byte specially?
+        if (!flags(ruleByte, FLAG_ALPHA_OR_QUOT)) {
+          // pos37226:
+          if (!{
+            // ' ' - next char must not be alpha or quotation mark.
+            ' ': () => !flagsAt(text, ++pos, FLAG_ALPHA_OR_QUOT),
+            // '#' - next char must be a vowel or Y.
+            '#': () => flagsAt(text, ++pos, FLAG_VOWEL_OR_Y),
+            // '.' - unknown?
+            '.': () => flagsAt(text, ++pos, FLAG_0X08),
+            // '&' - next char must be a diphthong or next chars must be 'HC' or 'HS'
+            '&': () => flagsAt(text, ++pos, FLAG_DIPHTHONG$1) || isOneOf(text.substr(++pos - 2, 2), ampersandSuffixDigraphs),
+            // '@' - next char must be voiced and not 'H'.
+            '@': () => {
+              if (flagsAt(text, ++pos, FLAG_VOICED$1)) {
+                return true;
+              }
+              let inputChar = text[pos];
+              if (inputChar !== atChar)
+                // 'H'
+                return false;
+              // Check for 'T', 'C', 'S'
+              if (!isOneOf(inputChar, TCS)) return false;
+              // FIXME: This is illogical and can never be reached. Bug in orig. code? reciter.c:489 (pos37367)
+              {
+                throw new Error('This should not be possible ', inputChar);
+              }
+            },
+            // '^' - next char must be a consonant.
+            '^': () => flagsAt(text, ++pos, FLAG_CONSONANT$1),
+            // '+' - next char must be either 'E', 'I' or 'Y'.
+            '+': () => isOneOf(text[++pos], EIY),
+            // ':' - walk right in input position until we hit a non consonant.
+            ':': () => {
+              while (flagsAt(text, pos + 1, FLAG_CONSONANT$1)) {
+                pos++;
+              }
+              return true;
+            },
+            /* '%' - check if we have:
+              - 'ING'
+              - 'E' not followed by alpha or quot
+              - 'ER' 'ES' or 'ED'
+              - 'EFUL'
+              - 'ELY'
+            */
+            '%': () => {
+              // If not 'E', check if 'ING'.
+              if (text[pos + 1] !== 'E') {
+                // Are next chars "ING"?
+                if (text.substr(pos + 1, 3) === 'ING') {
+                  pos += 3;
+                  return true;
+                }
+                return false;
+              }
+              // we have 'E' - check if not followed by alpha or quot.
+              if (!flagsAt(text, pos + 2, FLAG_ALPHA_OR_QUOT)) {
+                pos++;
+                return true;
+              }
+              // NOT 'ER', 'ES' OR 'ED'
+              if (!isOneOf(text[pos + 2], ['R', 'S', 'D'])) {
+                // NOT 'EL'
+                if (text[pos + 2] !== 'L') {
+                  // 'EFUL'
+                  if (text.substr(pos + 2, 3) === 'FUL') {
+                    // 'FUL'
+                    pos += 4;
+                    return true;
+                  }
+                  return false;
+                }
+                // NOT 'ELY'
+                if (text[pos + 3] !== 'Y') return false;
+                pos += 3;
+                return true;
+              }
+              pos += 2;
+              return true;
+            }
+          }[ruleByte]()) {
+            return false;
+          }
+        }
+        // Rule char does not match.
+        else if (text[++pos] !== ruleByte) {
+          return false;
+        }
+      }
+      return true;
+    };
+
+    /**
+     * Test if the rule matches.
+     *
+     * @param {string} text The input text.
+     * @param {Number} pos  The input position we are working from.
+     * @return {boolean}
+     */
+    let matches = (text, pos) => {
+      // check if content in brackets matches.
+      if (!text.startsWith(match, pos)) {
+        return false;
+      }
+
+      // Check left...
+      if (!checkPrefix(text, pos)) {
+        return false;
+      }
+
+      // Check right...
+      return checkSuffix(text, pos + (match.length - 1));
+    };
+
+    /**
+     * This is the real implementation of rule processing.
+     *
+     * @param {string}          text     The text to process.
+     * @param {Number}          inputPos The current position in the stream.
+     * @param {successCallback} callback
+     *
+     * @return {boolean}
+     */
+    let result = (text, inputPos, callback) => {
+      if (matches(text, inputPos)) {
+        {
+          console.log(`${source} -> ${target}`);
+        }
+        callback(target, match.length);
+        return true;
+      }
+    };
+    result.c = match[0];
+    return result;
+  };
+
+  // Map all rules and generate processors from them.
+  let rules = {};
+  tables.rules.split('|').map(rule => {
+    let r = reciterRule(rule),
+      c = r.c;
+    rules[c] = rules[c] || [];
+    rules[c].push(r);
+  });
+  let rules2 = tables.rules2.split('|').map(reciterRule);
+
+  /**
+   * Convert the text to a phoneme string.
+   *
+   * @param {string} input The input string to convert.
+   *
+   * @return {boolean|string}
+   */
+  let TextToPhonemes = input => {
+    let text = ' ' + (tables.normalize ? tables.normalize(input) : input.toUpperCase());
+    let inputPos = 0,
+      output = '';
+    /**
+     * The input callback (successCallback) used from the rules.
+     *
+     * @param {string} append    The string to append.
+     * @param {Number} inputSkip The amount or chars to move ahead in the input.
+     */
+    let successCallback = (append, inputSkip) => {
+      inputPos += inputSkip;
+      output += append;
+    };
+    let c = 0;
+    while (inputPos < text.length && c++ < 10000) {
+      {
+        let tmp = text.toLowerCase();
+        console.log(`processing "${tmp.substr(0, inputPos)}%c${tmp[inputPos].toUpperCase()}%c${tmp.substr(inputPos + 1)}"`, 'color: red;', 'color:normal;');
+      }
+      let currentChar = text[inputPos];
+
+      // NOT '.' or '.' followed by number.
+      if (currentChar !== '.' || flagsAt(text, inputPos + 1, FLAG_NUMERIC)) {
+        //pos36607:
+        if (flags(currentChar, FLAG_RULESET2)) {
+          rules2.some(rule => {
+            return rule(text, inputPos, successCallback);
+          });
+          continue;
+        }
+        //pos36630:
+        if (tables.charFlags[currentChar] !== 0) {
+          // pos36677:
+          if (!flags(currentChar, FLAG_ALPHA_OR_QUOT)) {
+            //36683: BRK
+            return false;
+          }
+          // go to the right rules for this character.
+          rules[currentChar].some(rule => {
+            return rule(text, inputPos, successCallback);
+          });
+          continue;
+        }
+        output += ' ';
+        inputPos++;
+        continue;
+      }
+      output += '.';
+      inputPos++;
+    }
+    return output;
+  };
+  return TextToPhonemes;
+};
+
+/**
+ * Russian language tables for the reciter ("СЭМ").
+ *
+ * The phoneme inventory is *exactly* the one of the original SAM - no formant
+ * data was added or changed, so the voice stays bit for bit the one of the
+ * 1982 original. Russian sounds are approximated with existing allophones:
+ *
+ *   б п д т г к в ф з с  ->  B P D T G K V F Z S
+ *   ж ш ч                ->  ZH SH CH
+ *   м н                  ->  M N  (NX before к/г)
+ *   л р й                ->  L R Y
+ *   х                    ->  /X   (unused by the english rules)
+ *   ц                    ->  TS   (affricate spelled out)
+ *   щ                    ->  SHSH (long soft ш)
+ *   soft consonants      ->  consonant + Y, e.g. ть -> TY
+ *   а о у э и            ->  AA OH UW EH IY  (stressed)
+ *                            AH AX UH EH IH  (reduced)
+ *   я е ё ю              ->  AE EH OH UW with a leading Y where iotated
+ *   ы                    ->  IH (see TUNE below)
+ *
+ * Note that single character phoneme names are written without the '*' pad
+ * character used in PhonemeNameTable - 'P' not 'P*' - as the parser matches
+ * two character names first and would read a literal '*' as phoneme 43.
+ */
+
+/**
+ * Phonemes that are a compromise and may be tuned by ear.
+ *
+ * ы has no counterpart at all in SAM's inventory, х and р only a rough one.
+ * They are kept in one place so they can be A/B tested without touching the
+ * rules below.
+ */
+let TUNE = {
+  YERY: 'IH',
+  // ы     - alternatives: 'IX', 'UX', 'ER', 'UH'
+  KH: '/X',
+  // х     - alternatives: '/H'
+  R: 'R',
+  // р     - alternatives: 'DX' (alveolar flap, a single tap)
+  SHCH: 'SHSH' // щ     - alternatives: 'SH'
+};
+let Y = TUNE.YERY;
+let H = TUNE.KH;
+let R = TUNE.R;
+let Q = TUNE.SHCH;
+
 /**
  * Char flags.
  *
+ * The bit positions are the ones of the original, their *meaning* is remapped
+ * to the classes russian phonology actually needs. The rule operators that
+ * read them are noted in brackets:
+ *
  *  0x01        numeric
  *  0x02        use rule set 2
- *  0x04        D J L N R S T Z
- *  0x08        B D G J L M N R V W Z
- *  0x10        C G J S X Z
- *  0x20        B C D F G H J K L M N P Q R S T V W X Y Z + ` => probably all consonants and '`'?
- *  0x40        is vowel or Y
- *  0x80        alpha or '
+ *  0x04  ['@'] voiced obstruent - triggers voicing of a preceding obstruent
+ *              (б г д ж з; в is excluded as it does not trigger it)
+ *  0x08  ['.'] voiceless obstruent - triggers devoicing of a preceding one
+ *  0x10  ['&'] always hard consonant (ж ш ц) - blocks palatalisation, и -> ы
+ *  0x20  ['^'] consonant (ь and ъ included so clusters can be walked over)
+ *  0x40  ['#'] vowel
+ *  0x80        alpha or stress mark
  */
 let charFlags = {
   ' ': 0,
+  // The stress mark. Alpha, so it can be matched literally by a rule, and
+  // rule set 2, so the main loop silently eats it.
+  '\'': 0 | 0x80 | 0x02,
   '!': 0 | 0x02,
   '"': 0 | 0x02,
   '#': 0 | 0x02,
   '$': 0 | 0x02,
   '%': 0 | 0x02,
   '&': 0 | 0x02,
-  '\'': 0 | 0x80 | 0x02,
   '(': 0,
   ')': 0,
   '*': 0 | 0x02,
@@ -234,390 +659,224 @@ let charFlags = {
   '9': 0 | 0x02 | 0x01,
   ':': 0 | 0x02,
   ';': 0 | 0x02,
-  '<': 0 | 0x02,
   '=': 0 | 0x02,
-  '>': 0 | 0x02,
   '?': 0 | 0x02,
   '@': 0 | 0x02,
-  'A': 0 | 0x80 | 0x40,
-  'B': 0 | 0x80 | 0x20 | 0x08,
-  'C': 0 | 0x80 | 0x20 | 0x10,
-  'D': 0 | 0x80 | 0x20 | 0x08 | 0x04,
-  'E': 0 | 0x80 | 0x40,
-  'F': 0 | 0x80 | 0x20,
-  'G': 0 | 0x80 | 0x20 | 0x10 | 0x08,
-  'H': 0 | 0x80 | 0x20,
-  'I': 0 | 0x80 | 0x40,
-  'J': 0 | 0x80 | 0x20 | 0x10 | 0x08 | 0x04,
-  'K': 0 | 0x80 | 0x20,
-  'L': 0 | 0x80 | 0x20 | 0x08 | 0x04,
-  'M': 0 | 0x80 | 0x20 | 0x08,
-  'N': 0 | 0x80 | 0x20 | 0x08 | 0x04,
-  'O': 0 | 0x80 | 0x40,
-  'P': 0 | 0x80 | 0x20,
-  'Q': 0 | 0x80 | 0x20,
-  'R': 0 | 0x80 | 0x20 | 0x08 | 0x04,
-  'S': 0 | 0x80 | 0x20 | 0x10 | 0x04,
-  'T': 0 | 0x80 | 0x20 | 0x04,
-  'U': 0 | 0x80 | 0x40,
-  'V': 0 | 0x80 | 0x20 | 0x08,
-  'W': 0 | 0x80 | 0x20 | 0x08,
-  'X': 0 | 0x80 | 0x20 | 0x10,
-  'Y': 0 | 0x80 | 0x40,
-  'Z': 0 | 0x80 | 0x20 | 0x10 | 0x08 | 0x04,
-  '[': 0,
-  '\\': 0,
-  ']': 0,
   '^': 0 | 0x02,
-  '_': 0,
-  '`': 0 | 0x20
-};
-let rules$1 = ' (A.)=EH4Y. |' + '(A) =AH|' + ' (ARE) =AAR|' + ' (AR)O=AXR|' + '(AR)#=EH4R|' + ' ^(AS)#=EY4S|' + '(A)WA=AX|' + '(AW)=AO5|' + ' :(ANY)=EH4NIY|' + '(A)^+#=EY5|' + '#:(ALLY)=ULIY|' + ' (AL)#=UL|' + '(AGAIN)=AXGEH4N|' + '#:(AG)E=IHJ|' + '(A)^%=EY|' + '(A)^+:#=AE|' + ' :(A)^+ =EY4|' + ' (ARR)=AXR|' + '(ARR)=AE4R|' + ' ^(AR) =AA5R|' + '(AR)=AA5R|' + '(AIR)=EH4R|' + '(AI)=EY4|' + '(AY)=EY5|' + '(AU)=AO4|' + '#:(AL) =UL|' + '#:(ALS) =ULZ|' + '(ALK)=AO4K|' + '(AL)^=AOL|' + ' :(ABLE)=EY4BUL|' + '(ABLE)=AXBUL|' + '(A)VO=EY4|' + '(ANG)+=EY4NJ|' + '(ATARI)=AHTAA4RIY|' + '(A)TOM=AE|' + '(A)TTI=AE|' + ' (AT) =AET|' + ' (A)T=AH|' + '(A)=AE|' + ' (B) =BIY4|' + ' (BE)^#=BIH|' + '(BEING)=BIY4IHNX|' + ' (BOTH) =BOW4TH|' + ' (BUS)#=BIH4Z|' + '(BREAK)=BREY5K|' + '(BUIL)=BIH4L|' + '(B)=B|' + ' (C) =SIY4|' + ' (CH)^=K|' + '^E(CH)=K|' + '(CHA)R#=KEH5|' + '(CH)=CH|' + ' S(CI)#=SAY4|' + '(CI)A=SH|' + '(CI)O=SH|' + '(CI)EN=SH|' + '(CITY)=SIHTIY|' + '(C)+=S|' + '(CK)=K|' + '(COMMODORE)=KAA4MAHDOHR|' + '(COM)=KAHM|' + '(CUIT)=KIHT|' + '(CREA)=KRIYEY|' + '(C)=K|' + ' (D) =DIY4|' + ' (DR.) =DAA4KTER|' + '#:(DED) =DIHD|' + '.E(D) =D|' + '#:^E(D) =T|' + ' (DE)^#=DIH|' + ' (DO) =DUW|' + ' (DOES)=DAHZ|' + '(DONE) =DAH5N|' + '(DOING)=DUW4IHNX|' + ' (DOW)=DAW|' + '#(DU)A=JUW|' + '#(DU)^#=JAX|' + '(D)=D|' + ' (E) =IYIY4|' + '#:(E) =|' + '\':^(E) =|' + ' :(E) =IY|' + '#(ED) =D|' + '#:(E)D =|' + '(EV)ER=EH4V|' + '(E)^%=IY4|' + '(ERI)#=IY4RIY|' + '(ERI)=EH4RIH|' + '#:(ER)#=ER|' + '(ERROR)=EH4ROHR|' + '(ERASE)=IHREY5S|' + '(ER)#=EHR|' + '(ER)=ER|' + ' (EVEN)=IYVEHN|' + '#:(E)W=|' + '@(EW)=UW|' + '(EW)=YUW|' + '(E)O=IY|' + '#:&(ES) =IHZ|' + '#:(E)S =|' + '#:(ELY) =LIY|' + '#:(EMENT)=MEHNT|' + '(EFUL)=FUHL|' + '(EE)=IY4|' + '(EARN)=ER5N|' + ' (EAR)^=ER5|' + '(EAD)=EHD|' + '#:(EA) =IYAX|' + '(EA)SU=EH5|' + '(EA)=IY5|' + '(EIGH)=EY4|' + '(EI)=IY4|' + ' (EYE)=AY4|' + '(EY)=IY|' + '(EU)=YUW5|' + '(EQUAL)=IY4KWUL|' + '(E)=EH|' + ' (F) =EH4F|' + '(FUL)=FUHL|' + '(FRIEND)=FREH5ND|' + '(FATHER)=FAA4DHER|' + '(F)F=|' + '(F)=F|' + ' (G) =JIY4|' + '(GIV)=GIH5V|' + ' (G)I^=G|' + '(GE)T=GEH5|' + 'SU(GGES)=GJEH4S|' + '(GG)=G|' + ' B#(G)=G|' + '(G)+=J|' + '(GREAT)=GREY4T|' + '(GON)E=GAO5N|' + '#(GH)=|' + ' (GN)=N|' + '(G)=G|' + ' (H) =EY4CH|' + ' (HAV)=/HAE6V|' + ' (HERE)=/HIYR|' + ' (HOUR)=AW5ER|' + '(HOW)=/HAW|' + '(H)#=/H|' + '(H)=|' + ' (IN)=IHN|' + ' (I) =AY4|' + '(I) =AY|' + '(IN)D=AY5N|' + 'SEM(I)=IY|' + ' ANT(I)=AY|' + '(IER)=IYER|' + '#:R(IED) =IYD|' + '(IED) =AY5D|' + '(IEN)=IYEHN|' + '(IE)T=AY4EH|' + '(I\')=AY5|' + ' :(I)^%=AY5|' + ' :(IE) =AY4|' + '(I)%=IY|' + '(IE)=IY4|' + ' (IDEA)=AYDIY5AH|' + '(I)^+:#=IH|' + '(IR)#=AYR|' + '(IZ)%=AYZ|' + '(IS)%=AYZ|' + 'I^(I)^#=IH|' + '+^(I)^+=AY|' + '#:^(I)^+=IH|' + '(I)^+=AY|' + '(IR)=ER|' + '(IGH)=AY4|' + '(ILD)=AY5LD|' + ' (IGN)=IHGN|' + '(IGN) =AY4N|' + '(IGN)^=AY4N|' + '(IGN)%=AY4N|' + '(ICRO)=AY4KROH|' + '(IQUE)=IY4K|' + '(I)=IH|' + ' (J) =JEY4|' + '(J)=J|' + ' (K) =KEY4|' + ' (K)N=|' + '(K)=K|' + ' (L) =EH4L|' + '(LO)C#=LOW|' + 'L(L)=|' + '#:^(L)%=UL|' + '(LEAD)=LIYD|' + ' (LAUGH)=LAE4F|' + '(L)=L|' + ' (M) =EH4M|' + ' (MR.) =MIH4STER|' + ' (MS.)=MIH5Z|' + ' (MRS.) =MIH4SIXZ|' + '(MOV)=MUW4V|' + '(MACHIN)=MAHSHIY5N|' + 'M(M)=|' + '(M)=M|' + ' (N) =EH4N|' + 'E(NG)+=NJ|' + '(NG)R=NXG|' + '(NG)#=NXG|' + '(NGL)%=NXGUL|' + '(NG)=NX|' + '(NK)=NXK|' + ' (NOW) =NAW4|' + 'N(N)=|' + '(NON)E=NAH4N|' + '(N)=N|' + ' (O) =OH4W|' + '(OF) =AHV|' + ' (OH) =OW5|' + '(OROUGH)=ER4OW|' + '#:(OR) =ER|' + '#:(ORS) =ERZ|' + '(OR)=AOR|' + ' (ONE)=WAHN|' + '#(ONE) =WAHN|' + '(OW)=OW|' + ' (OVER)=OW5VER|' + 'PR(O)V=UW4|' + '(OV)=AH4V|' + '(O)^%=OW5|' + '(O)^EN=OW|' + '(O)^I#=OW5|' + '(OL)D=OW4L|' + '(OUGHT)=AO5T|' + '(OUGH)=AH5F|' + ' (OU)=AW|' + 'H(OU)S#=AW4|' + '(OUS)=AXS|' + '(OUR)=OHR|' + '(OULD)=UH5D|' + '(OU)^L=AH5|' + '(OUP)=UW5P|' + '(OU)=AW|' + '(OY)=OY|' + '(OING)=OW4IHNX|' + '(OI)=OY5|' + '(OOR)=OH5R|' + '(OOK)=UH5K|' + 'F(OOD)=UW5D|' + 'L(OOD)=AH5D|' + 'M(OOD)=UW5D|' + '(OOD)=UH5D|' + 'F(OOT)=UH5T|' + '(OO)=UW5|' + '(O\')=OH|' + '(O)E=OW|' + '(O) =OW|' + '(OA)=OW4|' + ' (ONLY)=OW4NLIY|' + ' (ONCE)=WAH4NS|' + '(ON\'T)=OW4NT|' + 'C(O)N=AA|' + '(O)NG=AO|' + ' :^(O)N=AH|' + 'I(ON)=UN|' + '#:(ON)=UN|' + '#^(ON)=UN|' + '(O)ST=OW|' + '(OF)^=AO4F|' + '(OTHER)=AH5DHER|' + 'R(O)B=RAA|' + '^R(O):#=OW5|' + '(OSS) =AO5S|' + '#:^(OM)=AHM|' + '(O)=AA|' + ' (P) =PIY4|' + '(PH)=F|' + '(PEOPL)=PIY5PUL|' + '(POW)=PAW4|' + '(PUT) =PUHT|' + '(P)P=|' + '(P)S=|' + '(P)N=|' + '(PROF.)=PROHFEH4SER|' + '(P)=P|' + ' (Q) =KYUW4|' + '(QUAR)=KWOH5R|' + '(QU)=KW|' + '(Q)=K|' + ' (R) =AA5R|' + ' (RE)^#=RIY|' + '(R)R=|' + '(R)=R|' + ' (S) =EH4S|' + '(SH)=SH|' + '#(SION)=ZHUN|' + '(SOME)=SAHM|' + '#(SUR)#=ZHER|' + '(SUR)#=SHER|' + '#(SU)#=ZHUW|' + '#(SSU)#=SHUW|' + '#(SED)=ZD|' + '#(S)#=Z|' + '(SAID)=SEHD|' + '^(SION)=SHUN|' + '(S)S=|' + '.(S) =Z|' + '#:.E(S) =Z|' + '#:^#(S) =S|' + 'U(S) =S|' + ' :#(S) =Z|' + '##(S) =Z|' + ' (SCH)=SK|' + '(S)C+=|' + '#(SM)=ZUM|' + '#(SN)\'=ZUM|' + '(STLE)=SUL|' + '(S)=S|' + ' (T) =TIY4|' + ' (THE) #=DHIY|' + ' (THE) =DHAX|' + '(TO) =TUX|' + ' (THAT)=DHAET|' + ' (THIS) =DHIHS|' + ' (THEY)=DHEY|' + ' (THERE)=DHEHR|' + '(THER)=DHER|' + '(THEIR)=DHEHR|' + ' (THAN) =DHAEN|' + ' (THEM) =DHAEN|' + '(THESE) =DHIYZ|' + ' (THEN)=DHEHN|' + '(THROUGH)=THRUW4|' + '(THOSE)=DHOHZ|' + '(THOUGH) =DHOW|' + '(TODAY)=TUXDEY|' + '(TOMO)RROW=TUMAA5|' + '(TO)TAL=TOW5|' + ' (THUS)=DHAH4S|' + '(TH)=TH|' + '#:(TED)=TIXD|' + 'S(TI)#N=CH|' + '(TI)O=SH|' + '(TI)A=SH|' + '(TIEN)=SHUN|' + '(TUR)#=CHER|' + '(TU)A=CHUW|' + ' (TWO)=TUW|' + '&(T)EN =|' + '(T)=T|' + ' (U) =YUW4|' + ' (UN)I=YUWN|' + ' (UN)=AHN|' + ' (UPON)=AXPAON|' + '@(UR)#=UH4R|' + '(UR)#=YUH4R|' + '(UR)=ER|' + '(U)^ =AH|' + '(U)^^=AH5|' + '(UY)=AY5|' + ' G(U)#=|' + 'G(U)%=|' + 'G(U)#=W|' + '#N(U)=YUW|' + '@(U)=UW|' + '(U)=YUW|' + ' (V) =VIY4|' + '(VIEW)=VYUW5|' + '(V)=V|' + ' (W) =DAH4BULYUW|' + ' (WERE)=WER|' + '(WA)SH=WAA|' + '(WA)ST=WEY|' + '(WA)S=WAH|' + '(WA)T=WAA|' + '(WHERE)=WHEHR|' + '(WHAT)=WHAHT|' + '(WHOL)=/HOWL|' + '(WHO)=/HUW|' + '(WH)=WH|' + '(WAR)#=WEHR|' + '(WAR)=WAOR|' + '(WOR)^=WER|' + '(WR)=R|' + '(WOM)A=WUHM|' + '(WOM)E=WIHM|' + '(WEA)R=WEH|' + '(WANT)=WAA5NT|' + 'ANS(WER)=ER|' + '(W)=W|' + ' (X) =EH4KR|' + ' (X)=Z|' + '(X)=KS|' + ' (Y) =WAY4|' + '(YOUNG)=YAHNX|' + ' (YOUR)=YOHR|' + ' (YOU)=YUW|' + ' (YES)=YEHS|' + ' (Y)=Y|' + 'F(Y)=AY|' + 'PS(YCH)=AYK|' + '#:^(Y)=IY|' + '#:^(Y)I=IY|' + ' :(Y) =AY|' + ' :(Y)#=AY|' + ' :(Y)^+:#=IH|' + ' :(Y)^#=AY|' + '(Y)=IH|' + ' (Z) =ZIY4|' + '(Z)=Z';
-let rules2$1 = '(A)=|' + '(!)=.|' + '(") =-AH5NKWOWT-|' + '(")=KWOW4T-|' + '(#)= NAH4MBER|' + '($)= DAA4LER|' + '(%)= PERSEH4NT|' + '(&)= AEND|' + '(\')=|' + '(*)= AE4STERIHSK|' + '(+)= PLAH4S|' + '(,)=,|' + ' (-) =-|' + '(-)=|' + '(.)= POYNT|' + '(/)= SLAE4SH|' + '(0)= ZIY4ROW|' + ' (1ST)=FER4ST|' + ' (10TH)=TEH4NTH|' + '(1)= WAH4N|' + ' (2ND)=SEH4KUND|' + '(2)= TUW4|' + ' (3RD)=THER4D|' + '(3)= THRIY4|' + '(4)= FOH4R|' + ' (5TH)=FIH4FTH|' + '(5)= FAY4V|' + ' (64) =SIH4KSTIY FOHR|' + '(6)= SIH4KS|' + '(7)= SEH4VUN|' + ' (8TH)=EY4TH|' + '(8)= EY4T|' + '(9)= NAY4N|' + '(:)=.|' + '(;)=.|' + '(<)= LEH4S DHAEN|' + '(=)= IY4KWULZ|' + '(>)= GREY4TER DHAEN|' + '(?)=?|' + '(@)= AE6T|' + '(^)= KAE4RIXT';
-
-let FLAG_NUMERIC = 0x01;
-let FLAG_RULESET2 = 0x02;
-let FLAG_VOICED$1 = 0x04; // FIXME: is this correct?
-let FLAG_0X08 = 0x08; // unknown.
-let FLAG_DIPHTHONG$1 = 0x10; // FIXME: is this correct?
-let FLAG_CONSONANT$1 = 0x20; // FIXME: is this correct?
-let FLAG_VOWEL_OR_Y = 0x40;
-let FLAG_ALPHA_OR_QUOT = 0x80;
-
-/**
- * Test if the char matches against the flags in the reciter table.
- * @param {string} c
- * @param {Number} flg
- * @return {boolean}
- */
-let flags = (c, flg) => {
-  return (charFlags[c] & flg) !== 0;
-};
-
-/**
- *
- * @param {string} text
- * @param {Number} pos
- * @param {Number} flg
- * @return {boolean}
- */
-let flagsAt = (text, pos, flg) => {
-  return flags(text[pos], flg);
-};
-/**
- *
- * @param {string} c
- * @param {Array} list
- *
- * @return {boolean}
- */
-let isOneOf = (c, list) => {
-  return list.indexOf(c) !== -1;
+  // Vowels.
+  'А': 0 | 0x80 | 0x40,
+  'Е': 0 | 0x80 | 0x40,
+  'Ё': 0 | 0x80 | 0x40,
+  'И': 0 | 0x80 | 0x40,
+  'О': 0 | 0x80 | 0x40,
+  'У': 0 | 0x80 | 0x40,
+  'Ы': 0 | 0x80 | 0x40,
+  'Э': 0 | 0x80 | 0x40,
+  'Ю': 0 | 0x80 | 0x40,
+  'Я': 0 | 0x80 | 0x40,
+  // Consonants.
+  'Б': 0 | 0x80 | 0x20 | 0x04,
+  'В': 0 | 0x80 | 0x20,
+  'Г': 0 | 0x80 | 0x20 | 0x04,
+  'Д': 0 | 0x80 | 0x20 | 0x04,
+  'Ж': 0 | 0x80 | 0x20 | 0x10 | 0x04,
+  'З': 0 | 0x80 | 0x20 | 0x04,
+  'Й': 0 | 0x80 | 0x20,
+  'К': 0 | 0x80 | 0x20 | 0x08,
+  'Л': 0 | 0x80 | 0x20,
+  'М': 0 | 0x80 | 0x20,
+  'Н': 0 | 0x80 | 0x20,
+  'П': 0 | 0x80 | 0x20 | 0x08,
+  'Р': 0 | 0x80 | 0x20,
+  'С': 0 | 0x80 | 0x20 | 0x08,
+  'Т': 0 | 0x80 | 0x20 | 0x08,
+  'Ф': 0 | 0x80 | 0x20 | 0x08,
+  'Х': 0 | 0x80 | 0x20 | 0x08,
+  'Ц': 0 | 0x80 | 0x20 | 0x10 | 0x08,
+  'Ч': 0 | 0x80 | 0x20 | 0x08,
+  'Ш': 0 | 0x80 | 0x20 | 0x10 | 0x08,
+  'Щ': 0 | 0x80 | 0x20 | 0x08,
+  // Signs - consonants for cluster walking, but neither voiced nor voiceless.
+  'Ь': 0 | 0x80 | 0x20,
+  'Ъ': 0 | 0x80 | 0x20
 };
 
-/**
- * Set a phoneme in the buffer.
- *
- * @callback successCallback
- *
- * @param {string} append    The string to append.
- * @param {Number} inputSkip The amount or chars to move ahead in the input.
- */
+/** Characters matched by the '+' operator: the vowels that soften a preceding
+ * consonant, plus the soft sign. Ъ is deliberately absent - it *blocks*
+ * palatalisation. */
+let plusChars = ['Е', 'Ё', 'И', 'Ю', 'Я', 'Ь'];
+
+/** The '@' operator has no exception character in russian. */
+let atChar = '';
+let atCheckChars = [];
+
+/** The '&' operator is a pure flag check here, no digraphs. */
+let ampersandPrefixDigraphs = [];
+let ampersandSuffixDigraphs = [];
+let VOWELS = 'АЕЁИОУЫЭЮЯ';
 
 /**
- * Generator for self processing rule instances.
- * @param {String} ruleString 'xxx(yyy)zzz=foobar' 'xxx(yyy)zzz' is the source value, 'foobar' is the destination value.
- * @return {result}
+ * Transliteration used for latin input so mixed script text does not abort
+ * the conversion.
  */
-let reciterRule = ruleString => {
-  let splitted = ruleString.split('=');
-  const
-    // Must pop and join here because of rule for '=' itself.
-    target = splitted.pop(),
-    source = splitted.join('=').split('('),
-    tmp = source.pop().split(')'),
-    pre = source[0],
-    match = tmp[0],
-    post = tmp[1];
-  let TCS = ['T', 'C', 'S'];
-  let EIY = ['E', 'I', 'Y'];
-
-  /**
-   * Test if the rule prefix matches.
-   * @param {string} text The input text.
-   * @param {Number} pos  The input position we are working from.
-   * @return {boolean}
-   */
-  let checkPrefix = (text, pos) => {
-    for (let rulePos = pre.length - 1; rulePos > -1; rulePos--) {
-      let ruleByte = pre[rulePos];
-      if (!flags(ruleByte, FLAG_ALPHA_OR_QUOT)) {
-        if (!{
-          // '' - previous char must not be alpha or quotation mark.
-          ' ': () => !flagsAt(text, --pos, FLAG_ALPHA_OR_QUOT),
-          // '#' - previous char must be a vowel or Y.
-          '#': () => flagsAt(text, --pos, FLAG_VOWEL_OR_Y),
-          // '.' - unknown?
-          '.': () => flagsAt(text, --pos, FLAG_0X08),
-          // '&' - previous char must be a diphthong or previous chars must be 'CH' or 'SH'
-          '&': () => flagsAt(text, --pos, FLAG_DIPHTHONG$1) || isOneOf(text.substr(--pos, 2), ['CH', 'SH']),
-          // '@' - previous char must be voiced and not 'H'.
-          '@': () => {
-            if (flagsAt(text, --pos, FLAG_VOICED$1)) {
-              return true;
-            }
-            let inputChar = text[pos];
-            // 'H'
-            if (inputChar !== 'H') return false;
-            // FIXME: this is always true?!? is there a "--pos" missing in original code?
-            // Check for 'T', 'C', 'S'
-            if (!isOneOf(inputChar, TCS)) {
-              return false;
-            }
-            {
-              throw new Error('Is always false but happened? ' + inputChar);
-            }
-          },
-          // '^' - previous char must be a consonant.
-          '^': () => flagsAt(text, --pos, FLAG_CONSONANT$1),
-          // '+' - previous char must be either 'E', 'I' or 'Y'.
-          '+': () => isOneOf(text[--pos], EIY),
-          // ':' - walk left in input position until we hit a non consonant or begin of string.
-          ':': () => {
-            while (pos >= 0) {
-              if (!flagsAt(text, pos - 1, FLAG_CONSONANT$1)) break;
-              pos--;
-            }
-            return true;
-          }
-        }[ruleByte]()) {
-          return false;
-        }
-      }
-      // Rule char does not match.
-      else if (text[--pos] !== ruleByte) {
-        return false;
-      }
-    }
-    return true;
-  };
-
-  /**
-   * Test if the rule suffix matches.
-   * @param {string} text The input text.
-   * @param {Number} pos  The input position we are working from.
-   * @return {boolean}
-   */
-  let checkSuffix = (text, pos) => {
-    for (let rulePos = 0; rulePos < post.length; rulePos++) {
-      let ruleByte = post[rulePos];
-      // do we have to handle the byte specially?
-      if (!flags(ruleByte, FLAG_ALPHA_OR_QUOT)) {
-        // pos37226:
-        if (!{
-          // ' ' - next char must not be alpha or quotation mark.
-          ' ': () => !flagsAt(text, ++pos, FLAG_ALPHA_OR_QUOT),
-          // '#' - next char must be a vowel or Y.
-          '#': () => flagsAt(text, ++pos, FLAG_VOWEL_OR_Y),
-          // '.' - unknown?
-          '.': () => flagsAt(text, ++pos, FLAG_0X08),
-          // '&' - next char must be a diphthong or next chars must be 'HC' or 'HS'
-          '&': () => flagsAt(text, ++pos, FLAG_DIPHTHONG$1) || isOneOf(text.substr(++pos - 2, 2), ['HC', 'HS']),
-          // '@' - next char must be voiced and not 'H'.
-          '@': () => {
-            if (flagsAt(text, ++pos, FLAG_VOICED$1)) {
-              return true;
-            }
-            let inputChar = text[pos];
-            if (inputChar !== 'H')
-              // 'H'
-              return false;
-            // Check for 'T', 'C', 'S'
-            if (!isOneOf(inputChar, TCS)) return false;
-            // FIXME: This is illogical and can never be reached. Bug in orig. code? reciter.c:489 (pos37367)
-            {
-              throw new Error('This should not be possible ', inputChar);
-            }
-          },
-          // '^' - next char must be a consonant.
-          '^': () => flagsAt(text, ++pos, FLAG_CONSONANT$1),
-          // '+' - next char must be either 'E', 'I' or 'Y'.
-          '+': () => isOneOf(text[++pos], EIY),
-          // ':' - walk right in input position until we hit a non consonant.
-          ':': () => {
-            while (flagsAt(text, pos + 1, FLAG_CONSONANT$1)) {
-              pos++;
-            }
-            return true;
-          },
-          /* '%' - check if we have:
-            - 'ING'
-            - 'E' not followed by alpha or quot
-            - 'ER' 'ES' or 'ED'
-            - 'EFUL'
-            - 'ELY'
-          */
-          '%': () => {
-            // If not 'E', check if 'ING'.
-            if (text[pos + 1] !== 'E') {
-              // Are next chars "ING"?
-              if (text.substr(pos + 1, 3) === 'ING') {
-                pos += 3;
-                return true;
-              }
-              return false;
-            }
-            // we have 'E' - check if not followed by alpha or quot.
-            if (!flagsAt(text, pos + 2, FLAG_ALPHA_OR_QUOT)) {
-              pos++;
-              return true;
-            }
-            // NOT 'ER', 'ES' OR 'ED'
-            if (!isOneOf(text[pos + 2], ['R', 'S', 'D'])) {
-              // NOT 'EL'
-              if (text[pos + 2] !== 'L') {
-                // 'EFUL'
-                if (text.substr(pos + 2, 3) === 'FUL') {
-                  // 'FUL'
-                  pos += 4;
-                  return true;
-                }
-                return false;
-              }
-              // NOT 'ELY'
-              if (text[pos + 3] !== 'Y') return false;
-              pos += 3;
-              return true;
-            }
-            pos += 2;
-            return true;
-          }
-        }[ruleByte]()) {
-          return false;
-        }
-      }
-      // Rule char does not match.
-      else if (text[++pos] !== ruleByte) {
-        return false;
-      }
-    }
-    return true;
-  };
-
-  /**
-   * Test if the rule matches.
-   *
-   * @param {string} text The input text.
-   * @param {Number} pos  The input position we are working from.
-   * @return {boolean}
-   */
-  let matches = (text, pos) => {
-    // check if content in brackets matches.
-    if (!text.startsWith(match, pos)) {
-      return false;
-    }
-
-    // Check left...
-    if (!checkPrefix(text, pos)) {
-      return false;
-    }
-
-    // Check right...
-    return checkSuffix(text, pos + (match.length - 1));
-  };
-
-  /**
-   * This is the real implementation of rule processing.
-   *
-   * @param {string}          text     The text to process.
-   * @param {Number}          inputPos The current position in the stream.
-   * @param {successCallback} callback
-   *
-   * @return {boolean}
-   */
-  let result = (text, inputPos, callback) => {
-    if (matches(text, inputPos)) {
-      {
-        console.log(`${source} -> ${target}`);
-      }
-      callback(target, match.length);
-      return true;
-    }
-  };
-  result.c = match[0];
-  return result;
+let LATIN = {
+  'A': 'А',
+  'B': 'Б',
+  'C': 'К',
+  'D': 'Д',
+  'E': 'Е',
+  'F': 'Ф',
+  'G': 'Г',
+  'H': 'Х',
+  'I': 'И',
+  'J': 'Ж',
+  'K': 'К',
+  'L': 'Л',
+  'M': 'М',
+  'N': 'Н',
+  'O': 'О',
+  'P': 'П',
+  'Q': 'К',
+  'R': 'Р',
+  'S': 'С',
+  'T': 'Т',
+  'U': 'У',
+  'V': 'В',
+  'W': 'В',
+  'X': 'КС',
+  'Y': 'Й',
+  'Z': 'З'
 };
 
-// Map all rules and generate processors from them.
-let rules = {};
-rules$1.split('|').map(rule => {
-  let r = reciterRule(rule),
-    c = r.c;
-  rules[c] = rules[c] || [];
-  rules[c].push(r);
+/**
+ * Prepare the input for the rule engine.
+ *
+ * Stress is the one thing the rules cannot work out on their own - it is
+ * lexical in russian and the rule language only sees a local window. All
+ * accepted ways of writing it are normalised to a single apostrophe placed
+ * *directly behind* the stressed vowel, which is where the rules expect it:
+ *
+ *   приве́т  (combining acute)  -> ПРИВЕ'Т
+ *   прив+ет ('+' before vowel) -> ПРИВЕ'Т
+ *   привёт  (ё is always stressed)
+ *
+ * Without a mark a word simply keeps its full, unreduced vowels.
+ *
+ * @param {string} input
+ *
+ * @return {string}
+ */
+let normalize = input => {
+  let text = input.toUpperCase();
+
+  // Combining acute or grave behind a vowel is the stress mark.
+  text = text.replace(new RegExp('([' + VOWELS + '])[̀́́]', 'g'), '$1\'');
+  // A '+' in front of a vowel is the plain ascii way of marking stress.
+  text = text.replace(new RegExp('\\+([' + VOWELS + '])', 'g'), '$1\'');
+  // Ё always carries the stress.
+  text = text.replace(/Ё(?!')/g, 'Ё\'');
+  // Latin letters are transliterated.
+  text = text.replace(/[A-Z]/g, c => LATIN[c]);
+  // Doubled consonants are pronounced as one.
+  text = text.replace(/([БВГДЖЗКЛМНПРСТФХЦЧШЩ])\1/g, '$1');
+  // Anything the tables do not know would abort the conversion - drop it.
+  text = text.replace(/[^АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ0-9 '!"#$%&*+,\-./:;=?@^]/g, ' ');
+  return text;
+};
+let rules =
+// --- А -----------------------------------------------------------------
+'(А)\'=AA4|' + '(А):#:#\'=AX|' + '(А):#\'=AH|' + '\':(А)=AX|' + '\':#:(А)=AX|' + '(А)=AA|' +
+// --- Б -----------------------------------------------------------------
+'(Б)Ь =PY|' + '(Б)@ =P|' + '(Б) =P|' + '(Б).=P|' + '(Б)+=BY|' + '(Б)=B|' +
+// --- В -----------------------------------------------------------------
+// чувство, здравствуй - в drops out of -вств-
+'(В)СТВ=|' + '(В)Ь =FY|' + '(В)@ =F|' + '(В) =F|' + '(В).=F|' + '(В)+=VY|' + '(В)=V|' +
+// --- Г -----------------------------------------------------------------
+// Adverbs that keep their Г against the genitive rule below.
+' МНО(Г)О =G|' + ' СТРО(Г)О =G|' + ' ДОРО(Г)О =G|' + ' УБО(Г)О =G|' + ' ПОЛО(Г)О =G|' +
+// Genitive endings -ого / -его are spoken -ово / -ево.
+'О(Г)О =V|' + 'Е(Г)О =V|' + '(Г)Ь =KY|' + '(Г)@ =K|' + '(Г) =K|' + '(Г).=K|' + '(Г)+=GY|' + '(Г)=G|' +
+// --- Д -----------------------------------------------------------------
+// здн -> зн, рдц -> рц
+'З(Д)Н=|' + 'Р(Д)Ц=|' + '(Д)Ь =TY|' + '(Д)@ =T|' + '(Д) =T|' + '(Д).=T|' + '(Д)+=DY|' + '(Д)=D|' +
+// --- Е -----------------------------------------------------------------
+'&(Е)\'=EH4|' + '&(Е)=EH|' + 'Ь(Е)\'=EH4|' + 'Ь(Е):#\'=IH|' + 'Ь(Е)=EH|' + 'Ъ(Е)\'=EH4|' + 'Ъ(Е):#\'=IH|' + 'Ъ(Е)=EH|' + ' (Е)\'=YEH4|' + ' (Е):#\'=YIH|' + ' (Е)=YEH|' + '#\'(Е)=YIH|' + '#(Е)\'=YEH4|' + '#(Е):#\'=YIH|' + '#(Е)=YEH|' + '(Е)\'=EH4|' + '\':(Е)=IH|' + '(Е):#\'=IH|' + '(Е)=EH|' +
+// --- Ё -----------------------------------------------------------------
+'Ь(Ё)=OH4|' + 'Ъ(Ё)=OH4|' + ' (Ё)=YOH4|' + '#\'(Ё)=YOH4|' + '#(Ё)=YOH4|' + '(Ё)=OH4|' +
+// --- Ж -----------------------------------------------------------------
+'(Ж)@ =SH|' + '(Ж) =SH|' + '(Ж).=SH|' + '(Ж)=ZH|' +
+// --- З -----------------------------------------------------------------
+'(З)Ь =SY|' + '(З)@ =S|' + '(З) =S|' + '(З).=S|' + '(З)+=ZY|' + '(З)=Z|' +
+// --- И -----------------------------------------------------------------
+'&(И)\'=' + Y + '4|' + '&(И)=' + Y + '|' + '(И)\'=IY4|' + '(И)=IH|' +
+// --- Й -----------------------------------------------------------------
+'(Й)=Y|' +
+// --- К -----------------------------------------------------------------
+'(К)@=G|' + '(К)+=KY|' + '(К)=K|' +
+// --- Л -----------------------------------------------------------------
+// солнце, сердце - л drops out of -лнц-
+'(Л)НЦ=|' + '(Л)+=LY|' + '(Л)=L|' +
+// --- М -----------------------------------------------------------------
+'(М)+=MY|' + '(М)=M|' +
+// --- Н -----------------------------------------------------------------
+'(Н)К=NX|' + '(Н)Г=NX|' + '(Н)+=NY|' + '(Н)=N|' +
+// --- О -----------------------------------------------------------------
+'(О)\'=OH4|' + '(О):#:#\'=AX|' + '(О):#\'=AH|' + '\':(О)=AX|' + '\':#:(О)=AX|' + '(О)=OH|' +
+// --- П -----------------------------------------------------------------
+'(П)@=B|' + '(П)+=PY|' + '(П)=P|' +
+// --- Р -----------------------------------------------------------------
+'(Р)+=' + R + 'Y|' + '(Р)=' + R + '|' +
+// --- С -----------------------------------------------------------------
+'(С)Ч=SH|' + '(С)Ш=SH|' + '(С)Ж=ZH|' + '(С)Ь =SY|' + '(С)@=Z|' + '(С)+=SY|' + '(С)=S|' +
+// --- Т -----------------------------------------------------------------
+// Reflexive -тся / -ться are spoken -цца.
+'(ТЬСЯ) =TSAX|' + '(ТСЯ) =TSAX|' +
+// стн -> сн, стл -> сл
+'С(Т)Н=|' + 'С(Т)Л=|' + '(Т)Ь =TY|' + '(Т)@=D|' + '(Т)+=TY|' + '(Т)=T|' +
+// --- У -----------------------------------------------------------------
+'(У)\'=UW4|' + '\':(У)=UH|' + '(У):#\'=UH|' + '(У)=UW|' +
+// --- Ф -----------------------------------------------------------------
+'(Ф)+=FY|' + '(Ф)=F|' +
+// --- Х -----------------------------------------------------------------
+'(Х)+=' + H + 'Y|' + '(Х)=' + H + '|' +
+// --- Ц -----------------------------------------------------------------
+'(Ц)=TS|' +
+// --- Ч -----------------------------------------------------------------
+' (ЧТОБ)=SHTOH4B|' + ' (ЧТО)=SHTOH4|' + 'КОНЕ(ЧН)О=SHN|' + '(Ч)=CH|' +
+// --- Ш -----------------------------------------------------------------
+'(Ш)=SH|' +
+// --- Щ -----------------------------------------------------------------
+'(Щ)=' + Q + '|' +
+// --- Ъ -----------------------------------------------------------------
+'(Ъ)#=Y|' + '(Ъ)=|' +
+// --- Ы -----------------------------------------------------------------
+'(Ы)\'=' + Y + '4|' + '(Ы)=' + Y + '|' +
+// --- Ь -----------------------------------------------------------------
+'(Ь)=|' +
+// --- Э -----------------------------------------------------------------
+'(Э)\'=EH4|' + '(Э)=EH|' +
+// --- Ю -----------------------------------------------------------------
+'Ь(Ю)\'=UW4|' + 'Ь(Ю):#\'=UH|' + 'Ь(Ю)=UW|' + 'Ъ(Ю)\'=UW4|' + 'Ъ(Ю):#\'=UH|' + 'Ъ(Ю)=UW|' + ' (Ю)\'=YUW4|' + ' (Ю):#\'=YUH|' + ' (Ю)=YUW|' + '#\'(Ю)=YUH|' + '#(Ю)\'=YUW4|' + '#(Ю):#\'=YUH|' + '#(Ю)=YUW|' + '(Ю)\'=UW4|' + '\':(Ю)=UH|' + '(Ю):#\'=UH|' + '(Ю)=UW|' +
+// --- Я -----------------------------------------------------------------
+'Ь(Я)\'=AA4|' + 'Ь(Я):#\'=IH|' + 'Ь(Я)=AA|' + 'Ъ(Я)\'=AA4|' + 'Ъ(Я):#\'=IH|' + 'Ъ(Я)=AA|' + ' (Я)\'=YAA4|' + ' (Я):#\'=YIH|' + ' (Я)=YAA|' + '#\'(Я) =YAX|' + '#\'(Я)=YIH|' + '#(Я)\'=YAA4|' + '#(Я) =YAX|' + '#(Я):#\'=YIH|' + '#(Я)=YAA|' + '(Я)\'=AE4|' +
+// Unstressed word final -я is far more common than the stressed one
+// (дядя, время, здания, ...), so it is reduced even without a mark.
+'(Я) =AX|' + '\':(Я)=IH|' + '(Я):#\'=IH|' + '(Я)=AE';
+let rules2 = '(\')=|' + '(!)=.|' + '(")=|' + '(#)= NOHMIHR|' + '($)= DOHLAR|' + '(%)= PRAHTSEH4NT|' + '(&)= IH|' + '(*)= ZVYOH4ZDAHCHKAH|' + '(+)= PLYUS|' + '(,)=,|' + ' (-) =-|' + '(-)=|' + '(.)= TOH4CHKAH|' + '(/)= DRAH4PY|' + '(0)= NOHLY|' + '(1)= AHDIY4N|' + '(2)= DVAA4|' + '(3)= TRIY4|' + '(4)= CHIH' + Y + '4RYIH|' + '(5)= PYAE4TY|' + '(6)= SHEH4STY|' + '(7)= SYEH4MY|' + '(8)= VOH4SYIHMY|' + '(9)= DYEH4VYIHTY|' + '(:)=.|' + '(;)=.|' + '(=)= RAA4VNOH|' + '(?)=?|' + '(@)= SAHBAA4KAH|' + '(^)= KRY4SHKAH';
+
+var russianTables = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  TUNE: TUNE,
+  ampersandPrefixDigraphs: ampersandPrefixDigraphs,
+  ampersandSuffixDigraphs: ampersandSuffixDigraphs,
+  atChar: atChar,
+  atCheckChars: atCheckChars,
+  charFlags: charFlags,
+  normalize: normalize,
+  plusChars: plusChars,
+  rules: rules,
+  rules2: rules2
 });
-let rules2 = rules2$1.split('|').map(reciterRule);
-
-/**
- * Convert the text to a phoneme string.
- *
- * @param {string} input The input string to convert.
- *
- * @return {boolean|string}
- */
-let TextToPhonemes = input => {
-  let text = ' ' + input.toUpperCase();
-  let inputPos = 0,
-    output = '';
-  /**
-   * The input callback (successCallback) used from the rules.
-   *
-   * @param {string} append    The string to append.
-   * @param {Number} inputSkip The amount or chars to move ahead in the input.
-   */
-  let successCallback = (append, inputSkip) => {
-    inputPos += inputSkip;
-    output += append;
-  };
-  let c = 0;
-  while (inputPos < text.length && c++ < 10000) {
-    {
-      let tmp = text.toLowerCase();
-      console.log(`processing "${tmp.substr(0, inputPos)}%c${tmp[inputPos].toUpperCase()}%c${tmp.substr(inputPos + 1)}"`, 'color: red;', 'color:normal;');
-    }
-    let currentChar = text[inputPos];
-
-    // NOT '.' or '.' followed by number.
-    if (currentChar !== '.' || flagsAt(text, inputPos + 1, FLAG_NUMERIC)) {
-      //pos36607:
-      if (flags(currentChar, FLAG_RULESET2)) {
-        rules2.some(rule => {
-          return rule(text, inputPos, successCallback);
-        });
-        continue;
-      }
-      //pos36630:
-      if (charFlags[currentChar] !== 0) {
-        // pos36677:
-        if (!flags(currentChar, FLAG_ALPHA_OR_QUOT)) {
-          //36683: BRK
-          return false;
-        }
-        // go to the right rules for this character.
-        rules[currentChar].some(rule => {
-          return rule(text, inputPos, successCallback);
-        });
-        continue;
-      }
-      output += ' ';
-      inputPos++;
-      continue;
-    }
-    output += '.';
-    inputPos++;
-  }
-  return output;
-};
 
 let StressTable = '*12345678'.split('');
 let PhonemeNameTable = (' *' +
@@ -3186,7 +3445,9 @@ let SamProcess = function (input) {
   return Renderer(parsed, options.pitch, options.mouth, options.throat, options.speed, options.singmode);
 };
 
-let convert = TextToPhonemes;
+// СЭМ speaks russian - the english reciter is still available by building one
+// from './reciter/tables.es6' instead.
+let convert = CreateReciter(russianTables);
 let buf8 = SamProcess;
 let buf32 = SamBuffer;
 

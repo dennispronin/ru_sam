@@ -1,9 +1,9 @@
 /**
- * This is SamJs.js v0.3.0
+ * This is SamJs.js v0.3.1
  *
  * A Javascript port of "SAM Software Automatic Mouth".
  *
- * (c) 2017-2024 Christian Schiffler
+ * (c) 2017-2026 Christian Schiffler
  *
  * @link(https://github.com/discordier/sam)
  *

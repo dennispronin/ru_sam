@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
   <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-  <title>SAM: Software Automatic Mouth</title>
+  <title>СЭМ: Software Automatic Mouth</title>
   <style>
     body {
       max-width: 12cm;
@@ -25,30 +25,38 @@
     a {
       cursor: pointer;
     }
+    .hint {
+      font-size: 0.8em;
+      color: #555;
+    }
   </style>
 </head>
 <body>
-<h1> SAM Software Automatic Mouth</h1>
-<h2>What is SAM?</h2>
+<h1> СЭМ Software Automatic Mouth</h1>
+<h2>Что такое СЭМ?</h2>
 <p>
-Sam is a very small Text-To-Speech (TTS) program written in Javascript,
-that runs on most popular platforms. It is an adaption to Javascript of
-the speech software SAM (Software Automatic Mouth) for the Commodore
-C64 published in the year 1982 by Don't Ask Software
-(now SoftVoice, Inc.). It includes a Text-To-Phoneme converter called
-reciter and a Phoneme-To-Speech routine for the final output.
+СЭМ — это русская версия SAM, очень маленькой программы синтеза речи
+(Text-To-Speech), написанной на Javascript и работающей в большинстве
+браузеров. SAM — это перенос на Javascript программы SAM (Software
+Automatic Mouth) для Commodore C64, выпущенной в 1982 году фирмой
+Don't Ask Software (теперь SoftVoice, Inc.). В её составе есть
+преобразователь текста в фонемы, называемый «reciter», и синтезатор
+звука из фонем.
 </p>
 <p>
-Currently compatible with Firefox, Chrome, Safari + iOS.
-The conversion was done by hand from the C source code by
-<a href="https://github.com/s-macke/SAM">Sebastian Macke</a>,
-and the refactored versions by
-<a href="https://github.com/vidarh/SAM">Vidar Hokstad</a> and
-<a href="https://github.com/8BitPimp/SAM">8BitPimp</a>
+Голос здесь — это в точности голос исходного SAM: синтезатор и его
+таблицы формант не менялись вовсе. По-русски СЭМ говорит за счёт нового
+набора правил «текст → фонемы», который раскладывает русские звуки по
+уже существующим аллофонам SAM: мягкие согласные как согласный + Y,
+<em>х</em> как /X, <em>ц</em> как TS, <em>щ</em> как долгое SH.
+</p>
+<p>
+Работает в Firefox, Chrome, Safari и iOS.
 </p>
 <script src="dist/samjs.js"></script>
 <script>
   const opts = {debug: 1, pitch: 64, speed: 72, mouth: 128, throat: 128};
+  const labels = {speed: 'Скорость', pitch: 'Тон', mouth: 'Рот', throat: 'Горло'};
   const presets = {
     sam:               {speed: 72, pitch: 64, throat: 128, mouth: 128},
     elf:               {speed: 72, pitch: 64, throat: 110, mouth: 160},
@@ -65,7 +73,7 @@ and the refactored versions by
     const setOpt = (name, value) => {
       opts[name] = value;
       controls[name].value = value;
-      document.getElementById(name + '-lbl').innerText = name.charAt(0).toUpperCase() + name.substring(1) + ': ' + value;
+      document.getElementById(name + '-lbl').innerText = labels[name] + ': ' + value;
     };
     ['speed', 'pitch', 'mouth', 'throat'].forEach(
       (name) => {
@@ -107,36 +115,65 @@ and the refactored versions by
 
 <hr>
 <form>
-  <h2>Speak</h2>
+  <h2>Сказать</h2>
   <div>
-    <label for="speechinput">Text to speak:</label>
-    <input size="60" id="speechinput" name="textfield" value="Hello, my name is SAM.">
+    <label for="speechinput">Текст:</label>
+    <input size="60" id="speechinput" name="textfield" value="Прив+ет, мен+я зов+ут СЭМ.">
+    <p class="hint">
+      Ударение можно поставить знаком <code>+</code> перед гласной
+      (<code>прив+ет</code>) или знаком акута над ней (<code>приве&#x301;т</code>).
+      Буква <code>ё</code> всегда считается ударной. Без ударения слово
+      читается с полными, нередуцированными гласными.
+    </p>
   <hr>
-    <label id="pitch-lbl" for="pitch">Pitch:   </label><input type="range" id="pitch" min="0" max="255" value="0" />
-    <label id="speed-lbl" for="speed">Speed:   </label><input type="range" id="speed" min="1" max="255" value="0" />
-    <label id="mouth-lbl" for="mouth">Mouth:   </label><input type="range" id="mouth" min="0" max="255" value="0" />
-    <label id="throat-lbl" for="throat">Throat: </label><input type="range" id="throat" min="0" max="255" value="0" />
-    <input type="button" id="say" value="Say">
-    <input type="button" id="download" value="Download">
+    <label id="pitch-lbl" for="pitch">Тон:   </label><input type="range" id="pitch" min="0" max="255" value="0" />
+    <label id="speed-lbl" for="speed">Скорость:   </label><input type="range" id="speed" min="1" max="255" value="0" />
+    <label id="mouth-lbl" for="mouth">Рот:   </label><input type="range" id="mouth" min="0" max="255" value="0" />
+    <label id="throat-lbl" for="throat">Горло: </label><input type="range" id="throat" min="0" max="255" value="0" />
+    <input type="button" id="say" value="Сказать">
+    <input type="button" id="download" value="Скачать">
   </div>
   <hr>
-  <h2>Presets</h2>
+  <h2>Предустановки</h2>
   <table>
     <thead>
-      <tr><th>Description</th><th>Speed</th><th>Pitch</th><th>Throat</th><th>Mouth</th></tr>
+      <tr><th>Описание</th><th>Скорость</th><th>Тон</th><th>Горло</th><th>Рот</th></tr>
     </thead>
     <tbody>
-      <tr><td><a id="preset_sam">SAM</a></td><td>72</td><td>64</td><td>128</td><td>128</td></tr>
-      <tr><td><a id="preset_elf">Elf</a></td><td>72</td><td>64</td><td>110</td><td>160</td></tr>
-      <tr><td><a id="preset_little_robot">Little Robot</a></td><td>92</td><td>60</td><td>190</td><td>190</td></tr>
-      <tr><td><a id="preset_stuffy_guy">Stuffy Guy</a></td><td>82</td><td>72</td><td>110</td><td>105</td></tr>
-      <tr><td><a id="preset_little_old_lady">Little Old Lady</a></td><td>82</td><td>32</td><td>145</td><td>145</td></tr>
-      <tr><td><a id="preset_extra_terrestrial">Extra-Terrestrial</a></td><td>100</td><td>64</td><td>150</td><td>200</td></tr>
+      <tr><td><a id="preset_sam">СЭМ</a></td><td>72</td><td>64</td><td>128</td><td>128</td></tr>
+      <tr><td><a id="preset_elf">Эльф</a></td><td>72</td><td>64</td><td>110</td><td>160</td></tr>
+      <tr><td><a id="preset_little_robot">Робот</a></td><td>92</td><td>60</td><td>190</td><td>190</td></tr>
+      <tr><td><a id="preset_stuffy_guy">Зануда</a></td><td>82</td><td>72</td><td>110</td><td>105</td></tr>
+      <tr><td><a id="preset_little_old_lady">Старушка</a></td><td>82</td><td>32</td><td>145</td><td>145</td></tr>
+      <tr><td><a id="preset_extra_terrestrial">Пришелец</a></td><td>100</td><td>64</td><td>150</td><td>200</td></tr>
     </tbody>
   </table>
 </form>
 <hr>
 
-<a href="https://github.com/discordier/sam">Github Repository with the source code</a>
+<h2>Благодарности</h2>
+<p>
+СЭМ — это форк проекта
+<a href="https://github.com/discordier/sam">discordier/sam</a>
+Кристиана Шиффлера (Christian Schiffler), которому принадлежит и перенос
+SAM на Javascript, и внешний вид этой страницы. Оригинальную демонстрацию
+можно послушать здесь:
+<a href="https://discordier.github.io/sam/">discordier.github.io/sam</a>.
+</p>
+<p>
+Перенос на Javascript был сделан вручную с исходников на C
+<a href="https://github.com/s-macke/SAM">Себастьяна Макке</a>
+и их переработок
+<a href="https://github.com/vidarh/SAM">Видара Хокстада</a> и
+<a href="https://github.com/8BitPimp/SAM">8BitPimp</a>.
+</p>
+<p>
+Разбор того, как SAM устроен внутри, есть в статье Артёма Скробова
+(@tyomitch) на Хабре:
+<a href="https://habr.com/ru/articles/500764/">habr.com/ru/articles/500764</a>.
+</p>
+<p>
+<a href="https://github.com/dennispronin/ru_sam">Репозиторий СЭМ с исходным кодом</a>
+</p>
 </body>
 </html>
