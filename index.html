@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-  <title>СЭМ: Software Automatic Mouth</title>
+  <title>СЭМ</title>
   <style>
     body {
       max-width: 12cm;
@@ -19,7 +19,6 @@
     label { width: 30%}
     input, select { width: 60%}
     input[type="button"] { width: 49%; }
-    input[type="range"] { transform: rotate(180deg);}
     table{width: 100%}
     tr th {text-align: left}
     a {
@@ -37,26 +36,20 @@
   </style>
 </head>
 <body>
-<h1> СЭМ Software Automatic Mouth</h1>
+<h1>СЭМ</h1>
 <h2>Что такое СЭМ?</h2>
 <p>
-СЭМ - это русская версия SAM, очень маленькой программы синтеза речи
-(Text-To-Speech), написанной на Javascript и работающей в большинстве
-браузеров. SAM - это перенос на Javascript программы SAM (Software
-Automatic Mouth) для Commodore C64, выпущенной в 1982 году фирмой
-Don't Ask Software (теперь SoftVoice, Inc.). В её составе есть
-преобразователь текста в фонемы, называемый «reciter», и синтезатор
-звука из фонем.
+СЭМ - это русская версия SAM (Software Automatic Mouth), небольшой
+программы синтеза речи для Commodore C64, выпущенной в 1982 году фирмой
+Don't Ask Software (сейчас SoftVoice, Inc.) Проект является форком переноса SAM на Javascript, сделанного Кристианом Шиффлером. Демонстрацию оригинала можно послушать на
+<a href="https://discordier.github.io/sam/">discordier.github.io/sam</a>.
 </p>
 <p>
 Голос здесь - это в точности голос исходного SAM: синтезатор и его
-таблицы формант не менялись вовсе. По-русски СЭМ говорит за счёт нового
+таблицы формант не менялись. По-русски СЭМ говорит за счёт нового
 набора правил «текст → фонемы», который раскладывает русские звуки по
 уже существующим аллофонам SAM: мягкие согласные как согласный + Y,
-<em>х</em> как /X, <em>ц</em> как TS, <em>щ</em> как долгое SH.
-</p>
-<p>
-Работает в Firefox, Chrome, Safari и iOS.
+<em>х</em> как /X, <em>ц</em> как TS, <em>щ</em> как долгое SH. Иными словами, СЭМ разговаривает с американским акцентом.
 </p>
 <script src="dist/samjs.min.js"></script>
 <script>
@@ -88,7 +81,7 @@ Don't Ask Software (теперь SoftVoice, Inc.). В её составе ест
       (name) => {
         const e = document.getElementById(name);
         controls[name] = e;
-        e.onchange = function (e) {
+        e.oninput = function (e) {
           setOpt(e.target.id, e.target.value);
 
         };
@@ -228,11 +221,6 @@ SAM на Javascript, и внешний вид этой страницы. Ори�
 и их переработок
 <a href="https://github.com/vidarh/SAM">Видара Хокстада</a> и
 <a href="https://github.com/8BitPimp/SAM">8BitPimp</a>.
-</p>
-<p>
-Разбор того, как SAM устроен внутри, есть в статье Артёма Скробова
-(@tyomitch) на Хабре:
-<a href="https://habr.com/ru/articles/500764/">habr.com/ru/articles/500764</a>.
 </p>
 <p>
 <a href="https://github.com/dennispronin/ru_sam">Репозиторий СЭМ с исходным кодом</a>

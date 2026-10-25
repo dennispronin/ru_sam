@@ -2,20 +2,19 @@
 
 ## Что это
 
-СЭМ - это русская версия SAM (Software Automatic Mouth), очень маленькой
+СЭМ - это русская версия SAM (Software Automatic Mouth), небольшой
 программы синтеза речи для Commodore C64, выпущенной в 1982 году фирмой
 Don't Ask Software (сейчас SoftVoice, Inc.).
 
 Проект является форком [discordier/sam](https://github.com/discordier/sam)
-- переноса SAM на Javascript, сделанного Кристианом Шиффлером. Живую
-демонстрацию оригинала можно послушать на
+- переноса SAM на Javascript, сделанного Кристианом Шиффлером. Демонстрацию оригинала можно послушать на
 [discordier.github.io/sam](https://discordier.github.io/sam/).
 
 **Голос здесь - в точности голос оригинального SAM.** Синтезатор
 (`src/renderer`), разборщик фонем (`src/parser`) и все их таблицы формант
 не менялись вообще. По-русски СЭМ говорит только за счёт нового набора
 правил «текст → фонемы» (`src/reciter/tables-ru.es6`), который раскладывает
-русские звуки по уже существующим аллофонам SAM.
+русские звуки по уже существующим аллофонам SAM. Иными словами, СЭМ разговаривает с американским акцентом.
 
 ## Использование
 
@@ -174,9 +173,7 @@ make release-docs
   этот проект;
 * [Себастьян Макке](https://github.com/s-macke/SAM) - исходники на C;
 * [Видар Хокстад](https://github.com/vidarh/SAM) и
-  [8BitPimp](https://github.com/8BitPimp/SAM) - их переработка;
-* Артём Скробов (@tyomitch) - разбор внутренностей SAM на Хабре:
-  [habr.com/ru/articles/500764](https://habr.com/ru/articles/500764/).
+  [8BitPimp](https://github.com/8BitPimp/SAM) - их переработка.
 
 ## Оригинальная документация
 
