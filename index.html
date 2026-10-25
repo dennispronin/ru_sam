@@ -13,11 +13,11 @@
     h1, h2 {
       text-align: center;
     }
-    label, input {
+    label, input, select {
       display: inline-block;
     }
     label { width: 30%}
-    input { width: 60%}
+    input, select { width: 60%}
     input[type="button"] { width: 49%; }
     input[type="range"] { transform: rotate(180deg);}
     table{width: 100%}
@@ -29,22 +29,27 @@
       font-size: 0.8em;
       color: #555;
     }
+    #status {
+      min-height: 1.2em;
+      font-size: 0.85em;
+      color: #a00;
+    }
   </style>
 </head>
 <body>
 <h1> СЭМ Software Automatic Mouth</h1>
 <h2>Что такое СЭМ?</h2>
 <p>
-СЭМ — это русская версия SAM, очень маленькой программы синтеза речи
+СЭМ - это русская версия SAM, очень маленькой программы синтеза речи
 (Text-To-Speech), написанной на Javascript и работающей в большинстве
-браузеров. SAM — это перенос на Javascript программы SAM (Software
+браузеров. SAM - это перенос на Javascript программы SAM (Software
 Automatic Mouth) для Commodore C64, выпущенной в 1982 году фирмой
 Don't Ask Software (теперь SoftVoice, Inc.). В её составе есть
 преобразователь текста в фонемы, называемый «reciter», и синтезатор
 звука из фонем.
 </p>
 <p>
-Голос здесь — это в точности голос исходного SAM: синтезатор и его
+Голос здесь - это в точности голос исходного SAM: синтезатор и его
 таблицы формант не менялись вовсе. По-русски СЭМ говорит за счёт нового
 набора правил «текст → фонемы», который раскладывает русские звуки по
 уже существующим аллофонам SAM: мягкие согласные как согласный + Y,
@@ -55,7 +60,11 @@ Don't Ask Software (теперь SoftVoice, Inc.). В её составе ест
 </p>
 <script src="dist/samjs.min.js"></script>
 <script>
-  const opts = {debug: 1, pitch: 64, speed: 72, mouth: 128, throat: 128};
+  const opts = {voice: 'russian', pitch: 64, speed: 72, mouth: 128, throat: 128};
+  const samples = {
+    russian: 'Прив+ет, мен+я зов+ут СЭМ.',
+    english: 'Hello, my name is SAM.',
+  };
   const labels = {speed: 'Скорость', pitch: 'Тон', mouth: 'Рот', throat: 'Горло'};
   const presets = {
     sam:               {speed: 72, pitch: 64, throat: 128, mouth: 128},
@@ -97,18 +106,65 @@ Don't Ask Software (теперь SoftVoice, Inc.). В её составе ест
       document.getElementById('preset_' + preset).addEventListener('click', () => selectPreset(preset));
     });
 
+    const voice = document.getElementById('voice');
+    const isSample = (value) => Object.keys(samples).some((k) => samples[k] === value);
+    voice.addEventListener('change', function () {
+      opts.voice = voice.value;
+      // Swap the demo line along with the language, unless it was edited.
+      if (isSample(input.value)) {
+        input.value = samples[voice.value];
+      }
+    });
+    opts.voice = voice.value;
+
+    const status = document.getElementById('status');
+    const setStatus = (text) => { status.innerText = text || ''; };
+
+    // The english reciter has no cyrillic in its tables at all and returns
+    // false for it, so say so instead of failing silently.
+    const unreadable = () => {
+      if ((opts.voice === 'english') && /[А-Яа-яЁё]/.test(input.value)) {
+        return 'Оригинальный SAM читает только латиницу - выберите «СЭМ по-русски».';
+      }
+
+      return null;
+    };
+
     let speech;
-    document.getElementById('say').addEventListener('click', function (e) {
-      e.preventDefault();
-      if (speech) {
+    const stopSpeech = () => {
+      // Guarded: a rejected speech promise may carry no usable abort, and a
+      // throw here would leave the old promise in place for ever.
+      if (speech && (typeof speech.abort === 'function')) {
         speech.abort();
       }
+      speech = null;
+    };
+
+    document.getElementById('say').addEventListener('click', function (e) {
+      e.preventDefault();
+      stopSpeech();
+      const problem = unreadable();
+      if (problem) {
+        setStatus(problem);
+        return;
+      }
+      setStatus('');
       speech = (new SamJs(opts)).speak(input.value);
-      speech.catch(() => {});
+      speech.catch(() => {
+        setStatus('Не удалось произнести этот текст.');
+      });
     });
     document.getElementById('download').addEventListener('click', function (e) {
       e.preventDefault();
-      (new SamJs(opts)).download(input.value);
+      const problem = unreadable();
+      if (problem) {
+        setStatus(problem);
+        return;
+      }
+      setStatus('');
+      if (false === (new SamJs(opts)).download(input.value)) {
+        setStatus('Не удалось произнести этот текст.');
+      }
     });
   });
 </script>
@@ -117,6 +173,11 @@ Don't Ask Software (теперь SoftVoice, Inc.). В её составе ест
 <form>
   <h2>Сказать</h2>
   <div>
+    <label for="voice">Голос:</label>
+    <select id="voice">
+      <option value="russian">СЭМ по-русски</option>
+      <option value="english">Оригинальный SAM (английский)</option>
+    </select>
     <label for="speechinput">Текст:</label>
     <input size="60" id="speechinput" name="textfield" value="Прив+ет, мен+я зов+ут СЭМ.">
     <p class="hint">
@@ -125,6 +186,7 @@ Don't Ask Software (теперь SoftVoice, Inc.). В её составе ест
       Буква <code>ё</code> всегда считается ударной. Без ударения слово
       читается с полными, нередуцированными гласными.
     </p>
+    <p id="status"></p>
   <hr>
     <label id="pitch-lbl" for="pitch">Тон:   </label><input type="range" id="pitch" min="0" max="255" value="0" />
     <label id="speed-lbl" for="speed">Скорость:   </label><input type="range" id="speed" min="1" max="255" value="0" />
@@ -153,7 +215,7 @@ Don't Ask Software (теперь SoftVoice, Inc.). В её составе ест
 
 <h2>Благодарности</h2>
 <p>
-СЭМ — это форк проекта
+СЭМ - это форк проекта
 <a href="https://github.com/discordier/sam">discordier/sam</a>
 Кристиана Шиффлера (Christian Schiffler), которому принадлежит и перенос
 SAM на Javascript, и внешний вид этой страницы. Оригинальную демонстрацию

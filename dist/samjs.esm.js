@@ -50,7 +50,8 @@ let Uint16ToUint8Array = uint16 => {
  * @return {Promise}
  */
 let Play = (context, audiobuffer) => {
-  let abort;
+  // Defined here so a throw inside the executor still leaves one behind.
+  let abort = () => {};
   let promise = new Promise((resolve, reject) => {
     let source = context.createBufferSource();
     let soundBuffer = context.createBuffer(1, audiobuffer.length, 22050);
@@ -69,7 +70,7 @@ let Play = (context, audiobuffer) => {
     };
     source.start(0);
   });
-  promise.abort = abort;
+  promise.abort = reason => abort(reason);
   return promise;
 };
 let context = null;
@@ -82,6 +83,11 @@ let context = null;
  * @return {Promise}
  */
 let PlayBuffer = audiobuffer => {
+  if (!audiobuffer || !audiobuffer.length) {
+    let rejected = Promise.reject(new Error('Nothing to play.'));
+    rejected.abort = () => {};
+    return rejected;
+  }
   if (null === context) {
     context = new AudioContext();
   }
@@ -177,6 +183,9 @@ let ToWavBuffer = audiobuffer => {
  * @return void
  */
 let RenderBuffer = audiobuffer => {
+  if (!audiobuffer || !audiobuffer.length) {
+    return false;
+  }
   let filename = "sam.wav";
   let blob = new Blob([ToWavBuffer(audiobuffer)], {
     type: "audio/vnd.wave"
@@ -191,6 +200,7 @@ let RenderBuffer = audiobuffer => {
   a.click();
   document.body.removeChild(a);
   url.revokeObjectURL(fileURL);
+  return true;
 };
 
 let FLAG_NUMERIC = 0x01;
@@ -203,19 +213,10 @@ let FLAG_VOWEL_OR_Y = 0x40;
 let FLAG_ALPHA_OR_QUOT = 0x80;
 
 /**
- * Build a reciter (text to phoneme converter) for a given language table.
- *
- * The rule engine itself is language agnostic, all language knowledge lives in
- * the passed table module. Beside the actual `charFlags`, `rules` and `rules2`
- * a table may override the few character classes the original (english) code
- * had hardcoded:
- *
- *  - `plusChars`  the characters matched by the '+' rule operator.
- *  - `atChar` / `atCheckChars` the exception handling of the '@' rule operator.
- *  - `ampersandPrefixDigraphs` / `ampersandSuffixDigraphs` the digraphs
- *    accepted by the '&' rule operator in addition to the flag check.
- *
- * Omitting them keeps the original english behaviour.
+ * Build a reciter for a language table. Beside charFlags, rules and rules2 a
+ * table may override the character classes the english code had hardcoded:
+ * plusChars, atChar, atCheckChars, ampersandPrefixDigraphs and
+ * ampersandSuffixDigraphs. Leaving them out keeps the english behaviour.
  *
  * @param {object} tables The language table module.
  *
@@ -566,72 +567,48 @@ let CreateReciter = tables => {
 };
 
 /**
- * Russian language tables for the reciter ("СЭМ").
+ * Russian tables for the reciter.
  *
- * The phoneme inventory is *exactly* the one of the original SAM - no formant
- * data was added or changed, so the voice stays bit for bit the one of the
- * 1982 original. Russian sounds are approximated with existing allophones:
+ * Uses the phoneme inventory of the original SAM as is - russian sounds are
+ * approximated with existing allophones, see the README for the mapping.
  *
- *   б п д т г к в ф з с  ->  B P D T G K V F Z S
- *   ж ш ч                ->  ZH SH CH
- *   м н                  ->  M N  (NX before к/г)
- *   л р й                ->  L R Y
- *   х                    ->  /X   (unused by the english rules)
- *   ц                    ->  TS   (affricate spelled out)
- *   щ                    ->  SHSH (long soft ш)
- *   soft consonants      ->  consonant + Y, e.g. ть -> TY
- *   а о у э и            ->  AA OH UW EH IY  (stressed)
- *                            AH AX UH EH IH  (reduced)
- *   я е ё ю              ->  AE EH OH UW with a leading Y where iotated
- *   ы                    ->  IH (see TUNE below)
- *
- * Note that single character phoneme names are written without the '*' pad
- * character used in PhonemeNameTable - 'P' not 'P*' - as the parser matches
- * two character names first and would read a literal '*' as phoneme 43.
+ * Single char phoneme names are written without the '*' pad of
+ * PhonemeNameTable ('P', not 'P*') - the parser matches two char names first
+ * and would take the '*' for phoneme 43.
  */
 
-/**
- * Phonemes that are a compromise and may be tuned by ear.
- *
- * ы has no counterpart at all in SAM's inventory, х and р only a rough one.
- * They are kept in one place so they can be A/B tested without touching the
- * rules below.
- */
+/** Sounds SAM has no real equivalent for. Compare them on tune.html. */
 let TUNE = {
   YERY: 'IH',
-  // ы     - alternatives: 'IX', 'UX', 'ER', 'UH'
+  // ы        - no counterpart at all; try IX, UX, ER, UH
   KH: '/X',
-  // х     - alternatives: '/H'
+  // х        - alternative /H
   R: 'R',
-  // р     - alternatives: 'DX' (alveolar flap, a single tap)
-  SHCH: 'SHSH' // щ     - alternatives: 'SH'
+  // р        - alternative DX, an alveolar flap
+  SHCH: 'SHSH',
+  // щ        - alternative SH
+  U: 'UW',
+  // у        - alternative UX, without the [w] offglide
+  SOFT: 'Y' // мягкость - the glide a soft consonant is built from;
+  //            'YX' is weaker, '' drops it altogether
 };
-let Y = TUNE.YERY;
-let H = TUNE.KH;
-let R = TUNE.R;
-let Q = TUNE.SHCH;
 
 /**
- * Char flags.
- *
- * The bit positions are the ones of the original, their *meaning* is remapped
- * to the classes russian phonology actually needs. The rule operators that
- * read them are noted in brackets:
+ * Char flags. Same bits as the english table, different meaning - the rule
+ * operator reading each one is in brackets.
  *
  *  0x01        numeric
  *  0x02        use rule set 2
- *  0x04  ['@'] voiced obstruent - triggers voicing of a preceding obstruent
- *              (б г д ж з; в is excluded as it does not trigger it)
- *  0x08  ['.'] voiceless obstruent - triggers devoicing of a preceding one
- *  0x10  ['&'] always hard consonant (ж ш ц) - blocks palatalisation, и -> ы
- *  0x20  ['^'] consonant (ь and ъ included so clusters can be walked over)
+ *  0x04  ['@'] voiced obstruent, voices what precedes it (б г д ж з, not в)
+ *  0x08  ['.'] voiceless obstruent, devoices what precedes it
+ *  0x10  ['&'] always hard (ж ш ц) - no palatalisation, и -> ы
+ *  0x20  ['^'] consonant (ь, ъ too, so clusters can be walked over)
  *  0x40  ['#'] vowel
  *  0x80        alpha or stress mark
  */
-let charFlags = {
+let charFlags$1 = {
   ' ': 0,
-  // The stress mark. Alpha, so it can be matched literally by a rule, and
-  // rule set 2, so the main loop silently eats it.
+  // Stress mark: alpha so rules can match it, rule set 2 so the loop eats it.
   '\'': 0 | 0x80 | 0x02,
   '!': 0 | 0x02,
   '"': 0 | 0x02,
@@ -701,9 +678,8 @@ let charFlags = {
   'Ъ': 0 | 0x80 | 0x20
 };
 
-/** Characters matched by the '+' operator: the vowels that soften a preceding
- * consonant, plus the soft sign. Ъ is deliberately absent - it *blocks*
- * palatalisation. */
+/** The '+' operator: vowels that soften the consonant before them, plus ь.
+ * Ъ is absent on purpose, it blocks palatalisation. */
 let plusChars = ['Е', 'Ё', 'И', 'Ю', 'Я', 'Ь'];
 
 /** The '@' operator has no exception character in russian. */
@@ -715,10 +691,7 @@ let ampersandPrefixDigraphs = [];
 let ampersandSuffixDigraphs = [];
 let VOWELS = 'АЕЁИОУЫЭЮЯ';
 
-/**
- * Transliteration used for latin input so mixed script text does not abort
- * the conversion.
- */
+/** Latin input, so mixed script text does not abort the conversion. */
 let LATIN = {
   'A': 'А',
   'B': 'Б',
@@ -749,18 +722,10 @@ let LATIN = {
 };
 
 /**
- * Prepare the input for the rule engine.
- *
- * Stress is the one thing the rules cannot work out on their own - it is
- * lexical in russian and the rule language only sees a local window. All
- * accepted ways of writing it are normalised to a single apostrophe placed
- * *directly behind* the stressed vowel, which is where the rules expect it:
- *
- *   приве́т  (combining acute)  -> ПРИВЕ'Т
- *   прив+ет ('+' before vowel) -> ПРИВЕ'Т
- *   привёт  (ё is always stressed)
- *
- * Without a mark a word simply keeps its full, unreduced vowels.
+ * Normalise the input. Stress cannot be derived by rule in russian, so every
+ * way of writing it (приве́т, прив+ет, ё) becomes one apostrophe behind the
+ * stressed vowel, which is where the rules look for it. Unmarked words keep
+ * their full vowels.
  *
  * @param {string} input
  *
@@ -775,94 +740,98 @@ let normalize = input => {
   text = text.replace(new RegExp('\\+([' + VOWELS + '])', 'g'), '$1\'');
   // Ё always carries the stress.
   text = text.replace(/Ё(?!')/g, 'Ё\'');
+  // A '+' not in front of a vowel is a typo, not the word "плюс".
+  text = text.replace(/([А-ЯЁ])\+/g, '$1').replace(/\+([А-ЯЁ])/g, '$1');
   // Latin letters are transliterated.
   text = text.replace(/[A-Z]/g, c => LATIN[c]);
   // Doubled consonants are pronounced as one.
   text = text.replace(/([БВГДЖЗКЛМНПРСТФХЦЧШЩ])\1/g, '$1');
-  // Anything the tables do not know would abort the conversion - drop it.
+  // Unknown chars would abort the conversion.
   text = text.replace(/[^АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ0-9 '!"#$%&*+,\-./:;=?@^]/g, ' ');
   return text;
 };
-let rules =
-// --- А -----------------------------------------------------------------
+let buildRules = a =>
+// А
 '(А)\'=AA4|' + '(А):#:#\'=AX|' + '(А):#\'=AH|' + '\':(А)=AX|' + '\':#:(А)=AX|' + '(А)=AA|' +
-// --- Б -----------------------------------------------------------------
-'(Б)Ь =PY|' + '(Б)@ =P|' + '(Б) =P|' + '(Б).=P|' + '(Б)+=BY|' + '(Б)=B|' +
-// --- В -----------------------------------------------------------------
-// чувство, здравствуй - в drops out of -вств-
-'(В)СТВ=|' + '(В)Ь =FY|' + '(В)@ =F|' + '(В) =F|' + '(В).=F|' + '(В)+=VY|' + '(В)=V|' +
-// --- Г -----------------------------------------------------------------
-// Adverbs that keep their Г against the genitive rule below.
+// Б
+'(Б)Ь =P' + a.SOFT + '|' + '(Б)@ =P|' + '(Б) =P|' + '(Б).=P|' + '(Б)+=B' + a.SOFT + '|' + '(Б)=B|' +
+// В
+// в drops out of -вств- (чувство, здравствуй)
+'(В)СТВ=|' + '(В)Ь =F' + a.SOFT + '|' + '(В)@ =F|' + '(В) =F|' + '(В).=F|' + '(В)+=V' + a.SOFT + '|' + '(В)=V|' +
+// Г
+// Adverbs that keep their Г.
 ' МНО(Г)О =G|' + ' СТРО(Г)О =G|' + ' ДОРО(Г)О =G|' + ' УБО(Г)О =G|' + ' ПОЛО(Г)О =G|' +
-// Genitive endings -ого / -его are spoken -ово / -ево.
-'О(Г)О =V|' + 'Е(Г)О =V|' + '(Г)Ь =KY|' + '(Г)@ =K|' + '(Г) =K|' + '(Г).=K|' + '(Г)+=GY|' + '(Г)=G|' +
-// --- Д -----------------------------------------------------------------
+// -ого / -его are spoken -ово / -ево.
+'О(Г)О =V|' + 'Е(Г)О =V|' + '(Г)Ь =K' + a.SOFT + '|' + '(Г)@ =K|' + '(Г) =K|' + '(Г).=K|' + '(Г)+=G' + a.SOFT + '|' + '(Г)=G|' +
+// Д
 // здн -> зн, рдц -> рц
-'З(Д)Н=|' + 'Р(Д)Ц=|' + '(Д)Ь =TY|' + '(Д)@ =T|' + '(Д) =T|' + '(Д).=T|' + '(Д)+=DY|' + '(Д)=D|' +
-// --- Е -----------------------------------------------------------------
+'З(Д)Н=|' + 'Р(Д)Ц=|' + '(Д)Ь =T' + a.SOFT + '|' + '(Д)@ =T|' + '(Д) =T|' + '(Д).=T|' + '(Д)+=D' + a.SOFT + '|' + '(Д)=D|' +
+// Е
 '&(Е)\'=EH4|' + '&(Е)=EH|' + 'Ь(Е)\'=EH4|' + 'Ь(Е):#\'=IH|' + 'Ь(Е)=EH|' + 'Ъ(Е)\'=EH4|' + 'Ъ(Е):#\'=IH|' + 'Ъ(Е)=EH|' + ' (Е)\'=YEH4|' + ' (Е):#\'=YIH|' + ' (Е)=YEH|' + '#\'(Е)=YIH|' + '#(Е)\'=YEH4|' + '#(Е):#\'=YIH|' + '#(Е)=YEH|' + '(Е)\'=EH4|' + '\':(Е)=IH|' + '(Е):#\'=IH|' + '(Е)=EH|' +
-// --- Ё -----------------------------------------------------------------
+// Ё
 'Ь(Ё)=OH4|' + 'Ъ(Ё)=OH4|' + ' (Ё)=YOH4|' + '#\'(Ё)=YOH4|' + '#(Ё)=YOH4|' + '(Ё)=OH4|' +
-// --- Ж -----------------------------------------------------------------
+// Ж
 '(Ж)@ =SH|' + '(Ж) =SH|' + '(Ж).=SH|' + '(Ж)=ZH|' +
-// --- З -----------------------------------------------------------------
-'(З)Ь =SY|' + '(З)@ =S|' + '(З) =S|' + '(З).=S|' + '(З)+=ZY|' + '(З)=Z|' +
-// --- И -----------------------------------------------------------------
-'&(И)\'=' + Y + '4|' + '&(И)=' + Y + '|' + '(И)\'=IY4|' + '(И)=IH|' +
-// --- Й -----------------------------------------------------------------
+// З
+'(З)Ь =S' + a.SOFT + '|' + '(З)@ =S|' + '(З) =S|' + '(З).=S|' + '(З)+=Z' + a.SOFT + '|' + '(З)=Z|' +
+// И
+'&(И)\'=' + a.YERY + '4|' + '&(И)=' + a.YERY + '|' + '(И)\'=IY4|' + '(И)=IH|' +
+// Й
 '(Й)=Y|' +
-// --- К -----------------------------------------------------------------
-'(К)@=G|' + '(К)+=KY|' + '(К)=K|' +
-// --- Л -----------------------------------------------------------------
-// солнце, сердце - л drops out of -лнц-
-'(Л)НЦ=|' + '(Л)+=LY|' + '(Л)=L|' +
-// --- М -----------------------------------------------------------------
-'(М)+=MY|' + '(М)=M|' +
-// --- Н -----------------------------------------------------------------
-'(Н)К=NX|' + '(Н)Г=NX|' + '(Н)+=NY|' + '(Н)=N|' +
-// --- О -----------------------------------------------------------------
+// К
+'(К)@=G|' + '(К)+=K' + a.SOFT + '|' + '(К)=K|' +
+// Л
+// л drops out of -лнц- (солнце)
+'(Л)НЦ=|' + '(Л)+=L' + a.SOFT + '|' + '(Л)=L|' +
+// М
+'(М)+=M' + a.SOFT + '|' + '(М)=M|' +
+// Н
+'(Н)К=NX|' + '(Н)Г=NX|' + '(Н)+=N' + a.SOFT + '|' + '(Н)=N|' +
+// О
 '(О)\'=OH4|' + '(О):#:#\'=AX|' + '(О):#\'=AH|' + '\':(О)=AX|' + '\':#:(О)=AX|' + '(О)=OH|' +
-// --- П -----------------------------------------------------------------
-'(П)@=B|' + '(П)+=PY|' + '(П)=P|' +
-// --- Р -----------------------------------------------------------------
-'(Р)+=' + R + 'Y|' + '(Р)=' + R + '|' +
-// --- С -----------------------------------------------------------------
-'(С)Ч=SH|' + '(С)Ш=SH|' + '(С)Ж=ZH|' + '(С)Ь =SY|' + '(С)@=Z|' + '(С)+=SY|' + '(С)=S|' +
-// --- Т -----------------------------------------------------------------
-// Reflexive -тся / -ться are spoken -цца.
+// П
+'(П)@=B|' + '(П)+=P' + a.SOFT + '|' + '(П)=P|' +
+// Р
+'(Р)+=' + a.R + a.SOFT + '|' + '(Р)=' + a.R + '|' +
+// С
+'(С)Ч=SH|' + '(С)Ш=SH|' + '(С)Ж=ZH|' + '(С)Ь =S' + a.SOFT + '|' + '(С)@=Z|' + '(С)+=S' + a.SOFT + '|' + '(С)=S|' +
+// Т
+// -тся / -ться are spoken -цца.
 '(ТЬСЯ) =TSAX|' + '(ТСЯ) =TSAX|' +
 // стн -> сн, стл -> сл
-'С(Т)Н=|' + 'С(Т)Л=|' + '(Т)Ь =TY|' + '(Т)@=D|' + '(Т)+=TY|' + '(Т)=T|' +
-// --- У -----------------------------------------------------------------
-'(У)\'=UW4|' + '\':(У)=UH|' + '(У):#\'=UH|' + '(У)=UW|' +
-// --- Ф -----------------------------------------------------------------
-'(Ф)+=FY|' + '(Ф)=F|' +
-// --- Х -----------------------------------------------------------------
-'(Х)+=' + H + 'Y|' + '(Х)=' + H + '|' +
-// --- Ц -----------------------------------------------------------------
+'С(Т)Н=|' + 'С(Т)Л=|' + '(Т)Ь =T' + a.SOFT + '|' + '(Т)@=D|' + '(Т)+=T' + a.SOFT + '|' + '(Т)=T|' +
+// У
+'(У)\'=' + a.U + '4|' + '\':(У)=UH|' + '(У):#\'=UH|' + '(У)=' + a.U + '|' +
+// Ф
+'(Ф)+=F' + a.SOFT + '|' + '(Ф)=F|' +
+// Х
+'(Х)+=' + a.KH + a.SOFT + '|' + '(Х)=' + a.KH + '|' +
+// Ц
 '(Ц)=TS|' +
-// --- Ч -----------------------------------------------------------------
+// Ч
 ' (ЧТОБ)=SHTOH4B|' + ' (ЧТО)=SHTOH4|' + 'КОНЕ(ЧН)О=SHN|' + '(Ч)=CH|' +
-// --- Ш -----------------------------------------------------------------
+// Ш
 '(Ш)=SH|' +
-// --- Щ -----------------------------------------------------------------
-'(Щ)=' + Q + '|' +
-// --- Ъ -----------------------------------------------------------------
+// Щ
+'(Щ)=' + a.SHCH + '|' +
+// Ъ
 '(Ъ)#=Y|' + '(Ъ)=|' +
-// --- Ы -----------------------------------------------------------------
-'(Ы)\'=' + Y + '4|' + '(Ы)=' + Y + '|' +
-// --- Ь -----------------------------------------------------------------
+// Ы
+'(Ы)\'=' + a.YERY + '4|' + '(Ы)=' + a.YERY + '|' +
+// Ь
 '(Ь)=|' +
-// --- Э -----------------------------------------------------------------
+// Э
 '(Э)\'=EH4|' + '(Э)=EH|' +
-// --- Ю -----------------------------------------------------------------
-'Ь(Ю)\'=UW4|' + 'Ь(Ю):#\'=UH|' + 'Ь(Ю)=UW|' + 'Ъ(Ю)\'=UW4|' + 'Ъ(Ю):#\'=UH|' + 'Ъ(Ю)=UW|' + ' (Ю)\'=YUW4|' + ' (Ю):#\'=YUH|' + ' (Ю)=YUW|' + '#\'(Ю)=YUH|' + '#(Ю)\'=YUW4|' + '#(Ю):#\'=YUH|' + '#(Ю)=YUW|' + '(Ю)\'=UW4|' + '\':(Ю)=UH|' + '(Ю):#\'=UH|' + '(Ю)=UW|' +
-// --- Я -----------------------------------------------------------------
+// Ю
+'Ь(Ю)\'=' + a.U + '4|' + 'Ь(Ю):#\'=UH|' + 'Ь(Ю)=' + a.U + '|' + 'Ъ(Ю)\'=' + a.U + '4|' + 'Ъ(Ю):#\'=UH|' + 'Ъ(Ю)=' + a.U + '|' + ' (Ю)\'=Y' + a.U + '4|' + ' (Ю):#\'=YUH|' + ' (Ю)=Y' + a.U + '|' + '#\'(Ю)=YUH|' + '#(Ю)\'=Y' + a.U + '4|' + '#(Ю):#\'=YUH|' + '#(Ю)=Y' + a.U + '|' + '(Ю)\'=' + a.U + '4|' + '\':(Ю)=UH|' + '(Ю):#\'=UH|' + '(Ю)=' + a.U + '|' +
+// Я
 'Ь(Я)\'=AA4|' + 'Ь(Я):#\'=IH|' + 'Ь(Я)=AA|' + 'Ъ(Я)\'=AA4|' + 'Ъ(Я):#\'=IH|' + 'Ъ(Я)=AA|' + ' (Я)\'=YAA4|' + ' (Я):#\'=YIH|' + ' (Я)=YAA|' + '#\'(Я) =YAX|' + '#\'(Я)=YIH|' + '#(Я)\'=YAA4|' + '#(Я) =YAX|' + '#(Я):#\'=YIH|' + '#(Я)=YAA|' + '(Я)\'=AE4|' +
-// Unstressed word final -я is far more common than the stressed one
-// (дядя, время, здания, ...), so it is reduced even without a mark.
+// Unstressed word final -я is much the commoner case (дядя, время), so it
+// reduces even without a mark.
 '(Я) =AX|' + '\':(Я)=IH|' + '(Я):#\'=IH|' + '(Я)=AE';
-let rules2 = '(\')=|' + '(!)=.|' + '(")=|' + '(#)= NOHMIHR|' + '($)= DOHLAR|' + '(%)= PRAHTSEH4NT|' + '(&)= IH|' + '(*)= ZVYOH4ZDAHCHKAH|' + '(+)= PLYUS|' + '(,)=,|' + ' (-) =-|' + '(-)=|' + '(.)= TOH4CHKAH|' + '(/)= DRAH4PY|' + '(0)= NOHLY|' + '(1)= AHDIY4N|' + '(2)= DVAA4|' + '(3)= TRIY4|' + '(4)= CHIH' + Y + '4RYIH|' + '(5)= PYAE4TY|' + '(6)= SHEH4STY|' + '(7)= SYEH4MY|' + '(8)= VOH4SYIHMY|' + '(9)= DYEH4VYIHTY|' + '(:)=.|' + '(;)=.|' + '(=)= RAA4VNOH|' + '(?)=?|' + '(@)= SAHBAA4KAH|' + '(^)= KRY4SHKAH';
+let buildRules2 = a => '(\')=|' + '(!)=.|' + '(")=|' + '(#)= NOHMIHR|' + '($)= DOHLAAR|' + '(%)= PRAHTSEH4NT|' + '(&)= IH|' + '(*)= ZVYOH4ZDAHCHKAH|' + '(+)= PLY' + a.U + 'S|' + '(,)=,|' + ' (-) =-|' + '(-)=|' + '(.)= TOH4CHKAH|' + '(/)= DRAH4PY|' + '(0)= NOHLY|' + '(1)= AHDIY4N|' + '(2)= DVAA4|' + '(3)= TRIY4|' + '(4)= CHIH' + a.YERY + '4RYIH|' + '(5)= PYAE4TY|' + '(6)= SHEH4STY|' + '(7)= SYEH4MY|' + '(8)= VOH4SYIHMY|' + '(9)= DYEH4VYIHTY|' + '(:)=.|' + '(;)=.|' + '(=)= RAA4VNOH|' + '(?)=?|' + '(@)= SAHBAA4KAH|' + '(^)= KRY4SHKAH';
+let rules$1 = buildRules(TUNE);
+let rules2$1 = buildRules2(TUNE);
 
 var russianTables = /*#__PURE__*/Object.freeze({
   __proto__: null,
@@ -871,9 +840,98 @@ var russianTables = /*#__PURE__*/Object.freeze({
   ampersandSuffixDigraphs: ampersandSuffixDigraphs,
   atChar: atChar,
   atCheckChars: atCheckChars,
-  charFlags: charFlags,
+  charFlags: charFlags$1,
   normalize: normalize,
   plusChars: plusChars,
+  rules: rules$1,
+  rules2: rules2$1
+});
+
+/**
+ * Char flags.
+ *
+ *  0x01        numeric
+ *  0x02        use rule set 2
+ *  0x04        D J L N R S T Z
+ *  0x08        B D G J L M N R V W Z
+ *  0x10        C G J S X Z
+ *  0x20        B C D F G H J K L M N P Q R S T V W X Y Z + ` => probably all consonants and '`'?
+ *  0x40        is vowel or Y
+ *  0x80        alpha or '
+ */
+let charFlags = {
+  ' ': 0,
+  '!': 0 | 0x02,
+  '"': 0 | 0x02,
+  '#': 0 | 0x02,
+  '$': 0 | 0x02,
+  '%': 0 | 0x02,
+  '&': 0 | 0x02,
+  '\'': 0 | 0x80 | 0x02,
+  '(': 0,
+  ')': 0,
+  '*': 0 | 0x02,
+  '+': 0 | 0x02,
+  ',': 0 | 0x02,
+  '-': 0 | 0x02,
+  '.': 0 | 0x02,
+  '/': 0 | 0x02,
+  '0': 0 | 0x02 | 0x01,
+  '1': 0 | 0x02 | 0x01,
+  '2': 0 | 0x02 | 0x01,
+  '3': 0 | 0x02 | 0x01,
+  '4': 0 | 0x02 | 0x01,
+  '5': 0 | 0x02 | 0x01,
+  '6': 0 | 0x02 | 0x01,
+  '7': 0 | 0x02 | 0x01,
+  '8': 0 | 0x02 | 0x01,
+  '9': 0 | 0x02 | 0x01,
+  ':': 0 | 0x02,
+  ';': 0 | 0x02,
+  '<': 0 | 0x02,
+  '=': 0 | 0x02,
+  '>': 0 | 0x02,
+  '?': 0 | 0x02,
+  '@': 0 | 0x02,
+  'A': 0 | 0x80 | 0x40,
+  'B': 0 | 0x80 | 0x20 | 0x08,
+  'C': 0 | 0x80 | 0x20 | 0x10,
+  'D': 0 | 0x80 | 0x20 | 0x08 | 0x04,
+  'E': 0 | 0x80 | 0x40,
+  'F': 0 | 0x80 | 0x20,
+  'G': 0 | 0x80 | 0x20 | 0x10 | 0x08,
+  'H': 0 | 0x80 | 0x20,
+  'I': 0 | 0x80 | 0x40,
+  'J': 0 | 0x80 | 0x20 | 0x10 | 0x08 | 0x04,
+  'K': 0 | 0x80 | 0x20,
+  'L': 0 | 0x80 | 0x20 | 0x08 | 0x04,
+  'M': 0 | 0x80 | 0x20 | 0x08,
+  'N': 0 | 0x80 | 0x20 | 0x08 | 0x04,
+  'O': 0 | 0x80 | 0x40,
+  'P': 0 | 0x80 | 0x20,
+  'Q': 0 | 0x80 | 0x20,
+  'R': 0 | 0x80 | 0x20 | 0x08 | 0x04,
+  'S': 0 | 0x80 | 0x20 | 0x10 | 0x04,
+  'T': 0 | 0x80 | 0x20 | 0x04,
+  'U': 0 | 0x80 | 0x40,
+  'V': 0 | 0x80 | 0x20 | 0x08,
+  'W': 0 | 0x80 | 0x20 | 0x08,
+  'X': 0 | 0x80 | 0x20 | 0x10,
+  'Y': 0 | 0x80 | 0x40,
+  'Z': 0 | 0x80 | 0x20 | 0x10 | 0x08 | 0x04,
+  '[': 0,
+  '\\': 0,
+  ']': 0,
+  '^': 0 | 0x02,
+  '_': 0,
+  '`': 0 | 0x20
+};
+let rules = ' (A.)=EH4Y. |' + '(A) =AH|' + ' (ARE) =AAR|' + ' (AR)O=AXR|' + '(AR)#=EH4R|' + ' ^(AS)#=EY4S|' + '(A)WA=AX|' + '(AW)=AO5|' + ' :(ANY)=EH4NIY|' + '(A)^+#=EY5|' + '#:(ALLY)=ULIY|' + ' (AL)#=UL|' + '(AGAIN)=AXGEH4N|' + '#:(AG)E=IHJ|' + '(A)^%=EY|' + '(A)^+:#=AE|' + ' :(A)^+ =EY4|' + ' (ARR)=AXR|' + '(ARR)=AE4R|' + ' ^(AR) =AA5R|' + '(AR)=AA5R|' + '(AIR)=EH4R|' + '(AI)=EY4|' + '(AY)=EY5|' + '(AU)=AO4|' + '#:(AL) =UL|' + '#:(ALS) =ULZ|' + '(ALK)=AO4K|' + '(AL)^=AOL|' + ' :(ABLE)=EY4BUL|' + '(ABLE)=AXBUL|' + '(A)VO=EY4|' + '(ANG)+=EY4NJ|' + '(ATARI)=AHTAA4RIY|' + '(A)TOM=AE|' + '(A)TTI=AE|' + ' (AT) =AET|' + ' (A)T=AH|' + '(A)=AE|' + ' (B) =BIY4|' + ' (BE)^#=BIH|' + '(BEING)=BIY4IHNX|' + ' (BOTH) =BOW4TH|' + ' (BUS)#=BIH4Z|' + '(BREAK)=BREY5K|' + '(BUIL)=BIH4L|' + '(B)=B|' + ' (C) =SIY4|' + ' (CH)^=K|' + '^E(CH)=K|' + '(CHA)R#=KEH5|' + '(CH)=CH|' + ' S(CI)#=SAY4|' + '(CI)A=SH|' + '(CI)O=SH|' + '(CI)EN=SH|' + '(CITY)=SIHTIY|' + '(C)+=S|' + '(CK)=K|' + '(COMMODORE)=KAA4MAHDOHR|' + '(COM)=KAHM|' + '(CUIT)=KIHT|' + '(CREA)=KRIYEY|' + '(C)=K|' + ' (D) =DIY4|' + ' (DR.) =DAA4KTER|' + '#:(DED) =DIHD|' + '.E(D) =D|' + '#:^E(D) =T|' + ' (DE)^#=DIH|' + ' (DO) =DUW|' + ' (DOES)=DAHZ|' + '(DONE) =DAH5N|' + '(DOING)=DUW4IHNX|' + ' (DOW)=DAW|' + '#(DU)A=JUW|' + '#(DU)^#=JAX|' + '(D)=D|' + ' (E) =IYIY4|' + '#:(E) =|' + '\':^(E) =|' + ' :(E) =IY|' + '#(ED) =D|' + '#:(E)D =|' + '(EV)ER=EH4V|' + '(E)^%=IY4|' + '(ERI)#=IY4RIY|' + '(ERI)=EH4RIH|' + '#:(ER)#=ER|' + '(ERROR)=EH4ROHR|' + '(ERASE)=IHREY5S|' + '(ER)#=EHR|' + '(ER)=ER|' + ' (EVEN)=IYVEHN|' + '#:(E)W=|' + '@(EW)=UW|' + '(EW)=YUW|' + '(E)O=IY|' + '#:&(ES) =IHZ|' + '#:(E)S =|' + '#:(ELY) =LIY|' + '#:(EMENT)=MEHNT|' + '(EFUL)=FUHL|' + '(EE)=IY4|' + '(EARN)=ER5N|' + ' (EAR)^=ER5|' + '(EAD)=EHD|' + '#:(EA) =IYAX|' + '(EA)SU=EH5|' + '(EA)=IY5|' + '(EIGH)=EY4|' + '(EI)=IY4|' + ' (EYE)=AY4|' + '(EY)=IY|' + '(EU)=YUW5|' + '(EQUAL)=IY4KWUL|' + '(E)=EH|' + ' (F) =EH4F|' + '(FUL)=FUHL|' + '(FRIEND)=FREH5ND|' + '(FATHER)=FAA4DHER|' + '(F)F=|' + '(F)=F|' + ' (G) =JIY4|' + '(GIV)=GIH5V|' + ' (G)I^=G|' + '(GE)T=GEH5|' + 'SU(GGES)=GJEH4S|' + '(GG)=G|' + ' B#(G)=G|' + '(G)+=J|' + '(GREAT)=GREY4T|' + '(GON)E=GAO5N|' + '#(GH)=|' + ' (GN)=N|' + '(G)=G|' + ' (H) =EY4CH|' + ' (HAV)=/HAE6V|' + ' (HERE)=/HIYR|' + ' (HOUR)=AW5ER|' + '(HOW)=/HAW|' + '(H)#=/H|' + '(H)=|' + ' (IN)=IHN|' + ' (I) =AY4|' + '(I) =AY|' + '(IN)D=AY5N|' + 'SEM(I)=IY|' + ' ANT(I)=AY|' + '(IER)=IYER|' + '#:R(IED) =IYD|' + '(IED) =AY5D|' + '(IEN)=IYEHN|' + '(IE)T=AY4EH|' + '(I\')=AY5|' + ' :(I)^%=AY5|' + ' :(IE) =AY4|' + '(I)%=IY|' + '(IE)=IY4|' + ' (IDEA)=AYDIY5AH|' + '(I)^+:#=IH|' + '(IR)#=AYR|' + '(IZ)%=AYZ|' + '(IS)%=AYZ|' + 'I^(I)^#=IH|' + '+^(I)^+=AY|' + '#:^(I)^+=IH|' + '(I)^+=AY|' + '(IR)=ER|' + '(IGH)=AY4|' + '(ILD)=AY5LD|' + ' (IGN)=IHGN|' + '(IGN) =AY4N|' + '(IGN)^=AY4N|' + '(IGN)%=AY4N|' + '(ICRO)=AY4KROH|' + '(IQUE)=IY4K|' + '(I)=IH|' + ' (J) =JEY4|' + '(J)=J|' + ' (K) =KEY4|' + ' (K)N=|' + '(K)=K|' + ' (L) =EH4L|' + '(LO)C#=LOW|' + 'L(L)=|' + '#:^(L)%=UL|' + '(LEAD)=LIYD|' + ' (LAUGH)=LAE4F|' + '(L)=L|' + ' (M) =EH4M|' + ' (MR.) =MIH4STER|' + ' (MS.)=MIH5Z|' + ' (MRS.) =MIH4SIXZ|' + '(MOV)=MUW4V|' + '(MACHIN)=MAHSHIY5N|' + 'M(M)=|' + '(M)=M|' + ' (N) =EH4N|' + 'E(NG)+=NJ|' + '(NG)R=NXG|' + '(NG)#=NXG|' + '(NGL)%=NXGUL|' + '(NG)=NX|' + '(NK)=NXK|' + ' (NOW) =NAW4|' + 'N(N)=|' + '(NON)E=NAH4N|' + '(N)=N|' + ' (O) =OH4W|' + '(OF) =AHV|' + ' (OH) =OW5|' + '(OROUGH)=ER4OW|' + '#:(OR) =ER|' + '#:(ORS) =ERZ|' + '(OR)=AOR|' + ' (ONE)=WAHN|' + '#(ONE) =WAHN|' + '(OW)=OW|' + ' (OVER)=OW5VER|' + 'PR(O)V=UW4|' + '(OV)=AH4V|' + '(O)^%=OW5|' + '(O)^EN=OW|' + '(O)^I#=OW5|' + '(OL)D=OW4L|' + '(OUGHT)=AO5T|' + '(OUGH)=AH5F|' + ' (OU)=AW|' + 'H(OU)S#=AW4|' + '(OUS)=AXS|' + '(OUR)=OHR|' + '(OULD)=UH5D|' + '(OU)^L=AH5|' + '(OUP)=UW5P|' + '(OU)=AW|' + '(OY)=OY|' + '(OING)=OW4IHNX|' + '(OI)=OY5|' + '(OOR)=OH5R|' + '(OOK)=UH5K|' + 'F(OOD)=UW5D|' + 'L(OOD)=AH5D|' + 'M(OOD)=UW5D|' + '(OOD)=UH5D|' + 'F(OOT)=UH5T|' + '(OO)=UW5|' + '(O\')=OH|' + '(O)E=OW|' + '(O) =OW|' + '(OA)=OW4|' + ' (ONLY)=OW4NLIY|' + ' (ONCE)=WAH4NS|' + '(ON\'T)=OW4NT|' + 'C(O)N=AA|' + '(O)NG=AO|' + ' :^(O)N=AH|' + 'I(ON)=UN|' + '#:(ON)=UN|' + '#^(ON)=UN|' + '(O)ST=OW|' + '(OF)^=AO4F|' + '(OTHER)=AH5DHER|' + 'R(O)B=RAA|' + '^R(O):#=OW5|' + '(OSS) =AO5S|' + '#:^(OM)=AHM|' + '(O)=AA|' + ' (P) =PIY4|' + '(PH)=F|' + '(PEOPL)=PIY5PUL|' + '(POW)=PAW4|' + '(PUT) =PUHT|' + '(P)P=|' + '(P)S=|' + '(P)N=|' + '(PROF.)=PROHFEH4SER|' + '(P)=P|' + ' (Q) =KYUW4|' + '(QUAR)=KWOH5R|' + '(QU)=KW|' + '(Q)=K|' + ' (R) =AA5R|' + ' (RE)^#=RIY|' + '(R)R=|' + '(R)=R|' + ' (S) =EH4S|' + '(SH)=SH|' + '#(SION)=ZHUN|' + '(SOME)=SAHM|' + '#(SUR)#=ZHER|' + '(SUR)#=SHER|' + '#(SU)#=ZHUW|' + '#(SSU)#=SHUW|' + '#(SED)=ZD|' + '#(S)#=Z|' + '(SAID)=SEHD|' + '^(SION)=SHUN|' + '(S)S=|' + '.(S) =Z|' + '#:.E(S) =Z|' + '#:^#(S) =S|' + 'U(S) =S|' + ' :#(S) =Z|' + '##(S) =Z|' + ' (SCH)=SK|' + '(S)C+=|' + '#(SM)=ZUM|' + '#(SN)\'=ZUM|' + '(STLE)=SUL|' + '(S)=S|' + ' (T) =TIY4|' + ' (THE) #=DHIY|' + ' (THE) =DHAX|' + '(TO) =TUX|' + ' (THAT)=DHAET|' + ' (THIS) =DHIHS|' + ' (THEY)=DHEY|' + ' (THERE)=DHEHR|' + '(THER)=DHER|' + '(THEIR)=DHEHR|' + ' (THAN) =DHAEN|' + ' (THEM) =DHAEN|' + '(THESE) =DHIYZ|' + ' (THEN)=DHEHN|' + '(THROUGH)=THRUW4|' + '(THOSE)=DHOHZ|' + '(THOUGH) =DHOW|' + '(TODAY)=TUXDEY|' + '(TOMO)RROW=TUMAA5|' + '(TO)TAL=TOW5|' + ' (THUS)=DHAH4S|' + '(TH)=TH|' + '#:(TED)=TIXD|' + 'S(TI)#N=CH|' + '(TI)O=SH|' + '(TI)A=SH|' + '(TIEN)=SHUN|' + '(TUR)#=CHER|' + '(TU)A=CHUW|' + ' (TWO)=TUW|' + '&(T)EN =|' + '(T)=T|' + ' (U) =YUW4|' + ' (UN)I=YUWN|' + ' (UN)=AHN|' + ' (UPON)=AXPAON|' + '@(UR)#=UH4R|' + '(UR)#=YUH4R|' + '(UR)=ER|' + '(U)^ =AH|' + '(U)^^=AH5|' + '(UY)=AY5|' + ' G(U)#=|' + 'G(U)%=|' + 'G(U)#=W|' + '#N(U)=YUW|' + '@(U)=UW|' + '(U)=YUW|' + ' (V) =VIY4|' + '(VIEW)=VYUW5|' + '(V)=V|' + ' (W) =DAH4BULYUW|' + ' (WERE)=WER|' + '(WA)SH=WAA|' + '(WA)ST=WEY|' + '(WA)S=WAH|' + '(WA)T=WAA|' + '(WHERE)=WHEHR|' + '(WHAT)=WHAHT|' + '(WHOL)=/HOWL|' + '(WHO)=/HUW|' + '(WH)=WH|' + '(WAR)#=WEHR|' + '(WAR)=WAOR|' + '(WOR)^=WER|' + '(WR)=R|' + '(WOM)A=WUHM|' + '(WOM)E=WIHM|' + '(WEA)R=WEH|' + '(WANT)=WAA5NT|' + 'ANS(WER)=ER|' + '(W)=W|' + ' (X) =EH4KR|' + ' (X)=Z|' + '(X)=KS|' + ' (Y) =WAY4|' + '(YOUNG)=YAHNX|' + ' (YOUR)=YOHR|' + ' (YOU)=YUW|' + ' (YES)=YEHS|' + ' (Y)=Y|' + 'F(Y)=AY|' + 'PS(YCH)=AYK|' + '#:^(Y)=IY|' + '#:^(Y)I=IY|' + ' :(Y) =AY|' + ' :(Y)#=AY|' + ' :(Y)^+:#=IH|' + ' :(Y)^#=AY|' + '(Y)=IH|' + ' (Z) =ZIY4|' + '(Z)=Z';
+let rules2 = '(A)=|' + '(!)=.|' + '(") =-AH5NKWOWT-|' + '(")=KWOW4T-|' + '(#)= NAH4MBER|' + '($)= DAA4LER|' + '(%)= PERSEH4NT|' + '(&)= AEND|' + '(\')=|' + '(*)= AE4STERIHSK|' + '(+)= PLAH4S|' + '(,)=,|' + ' (-) =-|' + '(-)=|' + '(.)= POYNT|' + '(/)= SLAE4SH|' + '(0)= ZIY4ROW|' + ' (1ST)=FER4ST|' + ' (10TH)=TEH4NTH|' + '(1)= WAH4N|' + ' (2ND)=SEH4KUND|' + '(2)= TUW4|' + ' (3RD)=THER4D|' + '(3)= THRIY4|' + '(4)= FOH4R|' + ' (5TH)=FIH4FTH|' + '(5)= FAY4V|' + ' (64) =SIH4KSTIY FOHR|' + '(6)= SIH4KS|' + '(7)= SEH4VUN|' + ' (8TH)=EY4TH|' + '(8)= EY4T|' + '(9)= NAY4N|' + '(:)=.|' + '(;)=.|' + '(<)= LEH4S DHAEN|' + '(=)= IY4KWULZ|' + '(>)= GREY4TER DHAEN|' + '(?)=?|' + '(@)= AE6T|' + '(^)= KAE4RIXT';
+
+var englishTables = /*#__PURE__*/Object.freeze({
+  __proto__: null,
+  charFlags: charFlags,
   rules: rules,
   rules2: rules2
 });
@@ -3445,14 +3503,31 @@ let SamProcess = function (input) {
   return Renderer(parsed, options.pitch, options.mouth, options.throat, options.speed, options.singmode);
 };
 
-// СЭМ speaks russian - the english reciter is still available by building one
-// from './reciter/tables.es6' instead.
-let convert = CreateReciter(russianTables);
+// Both voices share the renderer and its formant tables and differ only in
+// the letter to phoneme rules.
+
+let voiceTables = {
+  russian: russianTables,
+  english: englishTables
+};
+let VOICES = Object.keys(voiceTables);
+
+// Built on first use, each compiles a whole rule table.
+let reciters = {};
+let voice = name => {
+  let key = voiceTables[name] ? name : 'russian';
+  if (!reciters[key]) {
+    reciters[key] = CreateReciter(voiceTables[key]);
+  }
+  return reciters[key];
+};
+let convert = text => voice('russian')(text);
 let buf8 = SamProcess;
 let buf32 = SamBuffer;
 
 /**
  * @param {object}  [options]
+ * @param {String}  [options.voice]    One of VOICES, default 'russian'.
  * @param {Boolean} [options.phonetic] Default false.
  * @param {Boolean} [options.singmode] Default false.
  * @param {Boolean} [options.debug]    Default false.
@@ -3465,9 +3540,10 @@ let buf32 = SamBuffer;
  */
 function SamJs(options) {
   let opts = options || {};
+  let selected = voice(opts.voice);
   let ensurePhonetic = (text, phonetic) => {
     if (!(phonetic || opts.phonetic)) {
-      return convert(text);
+      return selected(text);
     }
     return text.toUpperCase();
   };
@@ -3511,7 +3587,7 @@ function SamJs(options) {
    * @return void
    */
   this.download = (text, phonetic) => {
-    RenderBuffer(this.buf8(text, phonetic));
+    return RenderBuffer(this.buf8(text, phonetic));
   };
 
   /**
@@ -3524,6 +3600,7 @@ function SamJs(options) {
    */
   this.wav = (text, phonetic) => ToWavBuffer(this.buf8(text, phonetic));
 }
+SamJs.VOICES = VOICES;
 SamJs.buf8 = buf8;
 SamJs.buf32 = buf32;
 SamJs.convert = convert;

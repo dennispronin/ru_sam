@@ -10,19 +10,10 @@ import {
 } from './constants.es6'
 
 /**
- * Build a reciter (text to phoneme converter) for a given language table.
- *
- * The rule engine itself is language agnostic, all language knowledge lives in
- * the passed table module. Beside the actual `charFlags`, `rules` and `rules2`
- * a table may override the few character classes the original (english) code
- * had hardcoded:
- *
- *  - `plusChars`  the characters matched by the '+' rule operator.
- *  - `atChar` / `atCheckChars` the exception handling of the '@' rule operator.
- *  - `ampersandPrefixDigraphs` / `ampersandSuffixDigraphs` the digraphs
- *    accepted by the '&' rule operator in addition to the flag check.
- *
- * Omitting them keeps the original english behaviour.
+ * Build a reciter for a language table. Beside charFlags, rules and rules2 a
+ * table may override the character classes the english code had hardcoded:
+ * plusChars, atChar, atCheckChars, ampersandPrefixDigraphs and
+ * ampersandSuffixDigraphs. Leaving them out keeps the english behaviour.
  *
  * @param {object} tables The language table module.
  *

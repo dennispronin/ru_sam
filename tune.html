@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <title>СЭМ: подбор звуков на слух</title>
+  <style>
+    body {
+      max-width: 14cm;
+      margin: 0 auto;
+      font-family: sans-serif;
+      box-sizing: content-box;
+    }
+    h1, h2 { text-align: center; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 1em; }
+    th { text-align: left; }
+    td, th { padding: 0.2em 0.3em; border-bottom: 1px solid #ddd; }
+    td.cand { width: 30%; }
+    td.phon { font-family: monospace; font-size: 0.85em; color: #555; }
+    button { cursor: pointer; width: 100%; }
+    .note { font-size: 0.85em; color: #555; }
+    .pick { background: #efe; }
+  </style>
+</head>
+<body>
+<h1>Подбор звуков на слух</h1>
+<p class="note">
+Эта страница - рабочий инструмент, а не часть демонстрации. У SAM нет
+фонем для некоторых русских звуков, и выбрать замену можно только ушами.
+Кнопки проигрывают фонемы напрямую (режим <code>phonetic</code>), минуя
+правила, так что сравнивается именно звук. Текущий выбор помечен зелёным.
+</p>
+<p class="note">
+Выбрав вариант, поменяйте его в <code>ACCENTS.native</code> в начале
+<code>src/reciter/tables-ru.es6</code> и пересоберите (<code>yarn build</code>).
+</p>
+
+<div id="tests"></div>
+
+<script src="dist/samjs.min.js"></script>
+<script>
+  const opts = {pitch: 64, speed: 72, mouth: 128, throat: 128};
+
+  // Each case: a russian word, the phoneme string with %s for the sound
+  // under test, and the candidates to drop into it.
+  const tests = [
+    {
+      sound: 'ы', word: 'рыба', pattern: 'DX%s4BAX',
+      current: 'IH',
+      candidates: ['IH', 'IX', 'UX', 'ER', 'UH'],
+      note: 'Единственный звук, которого у SAM нет вообще. [ɨ] - высокий центральный.',
+    },
+    {
+      sound: 'ы', word: 'сыр', pattern: 'S%s4DX',
+      current: 'IH',
+      candidates: ['IH', 'IX', 'UX', 'ER', 'UH'],
+      note: 'То же самое, но под ударением и в открытом слоге.',
+    },
+    {
+      sound: 'р', word: 'рыба', pattern: '%sIH4BAX',
+      current: 'DX',
+      candidates: ['DX', 'R', 'DXDX'],
+      note: 'DX - одноударное; R - английский аппроксимант; DXDX - попытка раската.',
+    },
+    {
+      sound: 'р', word: 'город', pattern: 'GOH4%sAXT',
+      current: 'DX',
+      candidates: ['DX', 'R', 'DXDX'],
+      note: 'После гласной. Именно здесь английское R звучит по-американски.',
+    },
+    {
+      sound: 'х', word: 'хорошо', pattern: '%sAXDXAHSHOH4',
+      current: '/X',
+      candidates: ['/X', '/H'],
+      note: '/X английские правила не используют вовсе, так что он свободен.',
+    },
+    {
+      sound: 'щ', word: 'щука', pattern: '%sUX4KAX',
+      current: 'SHSH',
+      candidates: ['SHSH', 'SH'],
+      note: 'Долгое [ɕː] против простого [ʂ].',
+    },
+    {
+      sound: 'я', word: 'пять', pattern: 'PY%s4TY',
+      current: 'AE',
+      candidates: ['AE', 'AA'],
+      note: 'AE - это [æ] из английского "cat", может звучать слишком по-английски.',
+    },
+    {
+      sound: 'мягкость', word: 'нет', pattern: 'N%sEH4T',
+      current: 'Y',
+      candidates: ['Y', 'YX', ''],
+      note: 'Мягкие согласные сейчас передаются как согласный + Y, то есть '
+          + '[nj], а не одним мягким [nʲ]. Это, возможно, главное, что осталось '
+          + 'от акцента: мягкость есть почти в каждом русском слове. '
+          + 'YX - более слабый призвук, пустая строка - совсем без него.',
+    },
+    {
+      sound: 'мягкость', word: 'пять', pattern: 'P%sAE4TY',
+      current: 'Y',
+      candidates: ['Y', 'YX', ''],
+      note: 'То же самое перед [æ].',
+    },
+    {
+      sound: 'у', word: 'ум', pattern: '%s4M',
+      current: 'UX',
+      candidates: ['UX', 'UW', 'UH'],
+      note: 'У UW выставлен FLAG_DIPHTHONG, поэтому к нему добавляется призвук [w].',
+    },
+  ];
+
+  let speech;
+  const say = (text, voice, phonetic) => {
+    if (speech && (typeof speech.abort === 'function')) {
+      speech.abort();
+    }
+    speech = null;
+    const o = Object.assign({}, opts, {voice: voice, phonetic: !!phonetic});
+    speech = (new SamJs(o)).speak(text);
+    speech.catch(() => {});
+  };
+
+  document.addEventListener('DOMContentLoaded', function () {
+    const host = document.getElementById('tests');
+
+    tests.forEach((test, i) => {
+      const table = document.createElement('table');
+      const rows = test.candidates.map((c) => {
+        const phonemes = test.pattern.replace('%s', c);
+        const isCurrent = (c === test.current);
+
+        return '<tr' + (isCurrent ? ' class="pick"' : '') + '>'
+          + '<td class="cand">' + (c === '' ? '(без призвука)' : c)
+          + (isCurrent ? ' (сейчас)' : '') + '</td>'
+          + '<td class="phon">' + phonemes + '</td>'
+          + '<td><button data-phonemes="' + phonemes + '">слушать</button></td>'
+          + '</tr>';
+      }).join('');
+
+      table.innerHTML =
+        '<thead><tr><th colspan="3">'
+        + test.sound + ' - «' + test.word + '»'
+        + '</th></tr><tr><td colspan="3" class="note">' + test.note + '</td></tr></thead>'
+        + '<tbody>' + rows + '</tbody>';
+      host.appendChild(table);
+    });
+
+    host.addEventListener('click', function (e) {
+      const phonemes = e.target.getAttribute('data-phonemes');
+      if (phonemes) {
+        say(phonemes, 'russian', true);
+      }
+    });
+
+  });
+</script>
+</body>
+</html>

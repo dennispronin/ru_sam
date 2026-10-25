@@ -35,7 +35,8 @@
    * @return {Promise}
    */
   let Play = (context, audiobuffer) => {
-    let abort;
+    // Defined here so a throw inside the executor still leaves one behind.
+    let abort = () => {};
     let promise = new Promise((resolve, reject) => {
       let source = context.createBufferSource();
       let soundBuffer = context.createBuffer(1, audiobuffer.length, 22050);
@@ -54,7 +55,7 @@
       };
       source.start(0);
     });
-    promise.abort = abort;
+    promise.abort = reason => abort(reason);
     return promise;
   };
   let context = null;
@@ -67,6 +68,11 @@
    * @return {Promise}
    */
   let PlayBuffer = audiobuffer => {
+    if (!audiobuffer || !audiobuffer.length) {
+      let rejected = Promise.reject(new Error('Nothing to play.'));
+      rejected.abort = () => {};
+      return rejected;
+    }
     if (null === context) {
       context = new AudioContext();
     }

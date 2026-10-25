@@ -1,17 +1,38 @@
 import {PlayBuffer, RenderBuffer} from './util/player.es6'
 import {CreateReciter} from './reciter/reciter.es6';
 import * as russianTables from './reciter/tables-ru.es6';
+import * as englishTables from './reciter/tables.es6';
 import {SamProcess, SamBuffer} from './sam/sam.es6';
 import { ToWavBuffer } from './util/player.es6';
 
-// СЭМ speaks russian - the english reciter is still available by building one
-// from './reciter/tables.es6' instead.
-const convert = CreateReciter(russianTables);
+// Both voices share the renderer and its formant tables and differ only in
+// the letter to phoneme rules.
+
+const voiceTables = {
+  russian: russianTables,
+  english: englishTables,
+};
+
+const VOICES = Object.keys(voiceTables);
+
+// Built on first use, each compiles a whole rule table.
+const reciters = {};
+const voice = (name) => {
+  const key = voiceTables[name] ? name : 'russian';
+  if (!reciters[key]) {
+    reciters[key] = CreateReciter(voiceTables[key]);
+  }
+
+  return reciters[key];
+};
+
+const convert = (text) => voice('russian')(text);
 const buf8 = SamProcess;
 const buf32 = SamBuffer;
 
 /**
  * @param {object}  [options]
+ * @param {String}  [options.voice]    One of VOICES, default 'russian'.
  * @param {Boolean} [options.phonetic] Default false.
  * @param {Boolean} [options.singmode] Default false.
  * @param {Boolean} [options.debug]    Default false.
@@ -24,10 +45,11 @@ const buf32 = SamBuffer;
  */
 function SamJs (options) {
   const opts = options || {};
+  const selected = voice(opts.voice);
 
   const ensurePhonetic = (text, phonetic) => {
     if (!(phonetic || opts.phonetic)) {
-      return convert(text);
+      return selected(text);
     }
     return text.toUpperCase();
   }
@@ -71,7 +93,7 @@ function SamJs (options) {
    * @return void
    */
   this.download = (text, phonetic) => {
-    RenderBuffer(this.buf8(text, phonetic));
+    return RenderBuffer(this.buf8(text, phonetic));
   }
 
   /**
@@ -85,6 +107,7 @@ function SamJs (options) {
   this.wav = (text, phonetic) => ToWavBuffer(this.buf8(text, phonetic));
 }
 
+SamJs.VOICES = VOICES;
 SamJs.buf8 = buf8;
 SamJs.buf32 = buf32;
 SamJs.convert = convert;

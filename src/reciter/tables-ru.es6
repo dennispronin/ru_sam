@@ -1,68 +1,41 @@
 /**
- * Russian language tables for the reciter ("СЭМ").
+ * Russian tables for the reciter.
  *
- * The phoneme inventory is *exactly* the one of the original SAM - no formant
- * data was added or changed, so the voice stays bit for bit the one of the
- * 1982 original. Russian sounds are approximated with existing allophones:
+ * Uses the phoneme inventory of the original SAM as is - russian sounds are
+ * approximated with existing allophones, see the README for the mapping.
  *
- *   б п д т г к в ф з с  ->  B P D T G K V F Z S
- *   ж ш ч                ->  ZH SH CH
- *   м н                  ->  M N  (NX before к/г)
- *   л р й                ->  L R Y
- *   х                    ->  /X   (unused by the english rules)
- *   ц                    ->  TS   (affricate spelled out)
- *   щ                    ->  SHSH (long soft ш)
- *   soft consonants      ->  consonant + Y, e.g. ть -> TY
- *   а о у э и            ->  AA OH UW EH IY  (stressed)
- *                            AH AX UH EH IH  (reduced)
- *   я е ё ю              ->  AE EH OH UW with a leading Y where iotated
- *   ы                    ->  IH (see TUNE below)
- *
- * Note that single character phoneme names are written without the '*' pad
- * character used in PhonemeNameTable - 'P' not 'P*' - as the parser matches
- * two character names first and would read a literal '*' as phoneme 43.
+ * Single char phoneme names are written without the '*' pad of
+ * PhonemeNameTable ('P', not 'P*') - the parser matches two char names first
+ * and would take the '*' for phoneme 43.
  */
 
-/**
- * Phonemes that are a compromise and may be tuned by ear.
- *
- * ы has no counterpart at all in SAM's inventory, х and р only a rough one.
- * They are kept in one place so they can be A/B tested without touching the
- * rules below.
- */
+/** Sounds SAM has no real equivalent for. Compare them on tune.html. */
 export const TUNE = {
-  YERY: 'IH',   // ы     - alternatives: 'IX', 'UX', 'ER', 'UH'
-  KH:   '/X',   // х     - alternatives: '/H'
-  R:    'R',    // р     - alternatives: 'DX' (alveolar flap, a single tap)
-  SHCH: 'SHSH', // щ     - alternatives: 'SH'
+  YERY: 'IH',   // ы        - no counterpart at all; try IX, UX, ER, UH
+  KH:   '/X',   // х        - alternative /H
+  R:    'R',    // р        - alternative DX, an alveolar flap
+  SHCH: 'SHSH', // щ        - alternative SH
+  U:    'UW',   // у        - alternative UX, without the [w] offglide
+  SOFT: 'Y',    // мягкость - the glide a soft consonant is built from;
+                //            'YX' is weaker, '' drops it altogether
 };
 
-const Y = TUNE.YERY;
-const H = TUNE.KH;
-const R = TUNE.R;
-const Q = TUNE.SHCH;
-
 /**
- * Char flags.
- *
- * The bit positions are the ones of the original, their *meaning* is remapped
- * to the classes russian phonology actually needs. The rule operators that
- * read them are noted in brackets:
+ * Char flags. Same bits as the english table, different meaning - the rule
+ * operator reading each one is in brackets.
  *
  *  0x01        numeric
  *  0x02        use rule set 2
- *  0x04  ['@'] voiced obstruent - triggers voicing of a preceding obstruent
- *              (б г д ж з; в is excluded as it does not trigger it)
- *  0x08  ['.'] voiceless obstruent - triggers devoicing of a preceding one
- *  0x10  ['&'] always hard consonant (ж ш ц) - blocks palatalisation, и -> ы
- *  0x20  ['^'] consonant (ь and ъ included so clusters can be walked over)
+ *  0x04  ['@'] voiced obstruent, voices what precedes it (б г д ж з, not в)
+ *  0x08  ['.'] voiceless obstruent, devoices what precedes it
+ *  0x10  ['&'] always hard (ж ш ц) - no palatalisation, и -> ы
+ *  0x20  ['^'] consonant (ь, ъ too, so clusters can be walked over)
  *  0x40  ['#'] vowel
  *  0x80        alpha or stress mark
  */
 export const charFlags = {
   ' ':  0,
-  // The stress mark. Alpha, so it can be matched literally by a rule, and
-  // rule set 2, so the main loop silently eats it.
+  // Stress mark: alpha so rules can match it, rule set 2 so the loop eats it.
   '\'': 0 | 0x80                                    | 0x02,
   '!':  0                                           | 0x02,
   '"':  0                                           | 0x02,
@@ -132,9 +105,8 @@ export const charFlags = {
   'Ъ':  0 | 0x80        | 0x20,
 };
 
-/** Characters matched by the '+' operator: the vowels that soften a preceding
- * consonant, plus the soft sign. Ъ is deliberately absent - it *blocks*
- * palatalisation. */
+/** The '+' operator: vowels that soften the consonant before them, plus ь.
+ * Ъ is absent on purpose, it blocks palatalisation. */
 export const plusChars = ['Е', 'Ё', 'И', 'Ю', 'Я', 'Ь'];
 
 /** The '@' operator has no exception character in russian. */
@@ -147,10 +119,7 @@ export const ampersandSuffixDigraphs = [];
 
 const VOWELS = 'АЕЁИОУЫЭЮЯ';
 
-/**
- * Transliteration used for latin input so mixed script text does not abort
- * the conversion.
- */
+/** Latin input, so mixed script text does not abort the conversion. */
 const LATIN = {
   'A': 'А', 'B': 'Б', 'C': 'К', 'D': 'Д', 'E': 'Е', 'F': 'Ф', 'G': 'Г',
   'H': 'Х', 'I': 'И', 'J': 'Ж', 'K': 'К', 'L': 'Л', 'M': 'М', 'N': 'Н',
@@ -159,18 +128,10 @@ const LATIN = {
 };
 
 /**
- * Prepare the input for the rule engine.
- *
- * Stress is the one thing the rules cannot work out on their own - it is
- * lexical in russian and the rule language only sees a local window. All
- * accepted ways of writing it are normalised to a single apostrophe placed
- * *directly behind* the stressed vowel, which is where the rules expect it:
- *
- *   приве́т  (combining acute)  -> ПРИВЕ'Т
- *   прив+ет ('+' before vowel) -> ПРИВЕ'Т
- *   привёт  (ё is always stressed)
- *
- * Without a mark a word simply keeps its full, unreduced vowels.
+ * Normalise the input. Stress cannot be derived by rule in russian, so every
+ * way of writing it (приве́т, прив+ет, ё) becomes one apostrophe behind the
+ * stressed vowel, which is where the rules look for it. Unmarked words keep
+ * their full vowels.
  *
  * @param {string} input
  *
@@ -188,67 +149,69 @@ export const normalize = (input) => {
   text = text.replace(new RegExp('\\+([' + VOWELS + '])', 'g'), '$1\'');
   // Ё always carries the stress.
   text = text.replace(/Ё(?!')/g, 'Ё\'');
+  // A '+' not in front of a vowel is a typo, not the word "плюс".
+  text = text.replace(/([А-ЯЁ])\+/g, '$1').replace(/\+([А-ЯЁ])/g, '$1');
   // Latin letters are transliterated.
   text = text.replace(/[A-Z]/g, (c) => LATIN[c]);
   // Doubled consonants are pronounced as one.
   text = text.replace(/([БВГДЖЗКЛМНПРСТФХЦЧШЩ])\1/g, '$1');
-  // Anything the tables do not know would abort the conversion - drop it.
+  // Unknown chars would abort the conversion.
   text = text.replace(/[^АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ0-9 '!"#$%&*+,\-./:;=?@^]/g, ' ');
 
   return text;
 };
 
-export const rules =
-  // --- А -----------------------------------------------------------------
+const buildRules = (a) =>
+  // А
   '(А)\'=AA4|' +
   '(А):#:#\'=AX|' +
   '(А):#\'=AH|' +
   '\':(А)=AX|' +
   '\':#:(А)=AX|' +
   '(А)=AA|' +
-  // --- Б -----------------------------------------------------------------
-  '(Б)Ь =PY|' +
+  // Б
+  '(Б)Ь =P' + a.SOFT + '|' +
   '(Б)@ =P|' +
   '(Б) =P|' +
   '(Б).=P|' +
-  '(Б)+=BY|' +
+  '(Б)+=B' + a.SOFT + '|' +
   '(Б)=B|' +
-  // --- В -----------------------------------------------------------------
-  // чувство, здравствуй - в drops out of -вств-
+  // В
+  // в drops out of -вств- (чувство, здравствуй)
   '(В)СТВ=|' +
-  '(В)Ь =FY|' +
+  '(В)Ь =F' + a.SOFT + '|' +
   '(В)@ =F|' +
   '(В) =F|' +
   '(В).=F|' +
-  '(В)+=VY|' +
+  '(В)+=V' + a.SOFT + '|' +
   '(В)=V|' +
-  // --- Г -----------------------------------------------------------------
-  // Adverbs that keep their Г against the genitive rule below.
+  // Г
+  // Adverbs that keep their Г.
   ' МНО(Г)О =G|' +
   ' СТРО(Г)О =G|' +
   ' ДОРО(Г)О =G|' +
   ' УБО(Г)О =G|' +
   ' ПОЛО(Г)О =G|' +
-  // Genitive endings -ого / -его are spoken -ово / -ево.
+  // -ого / -его are spoken -ово / -ево.
   'О(Г)О =V|' +
   'Е(Г)О =V|' +
-  '(Г)Ь =KY|' +
+  '(Г)Ь =K' + a.SOFT + '|' +
   '(Г)@ =K|' +
   '(Г) =K|' +
   '(Г).=K|' +
-  '(Г)+=GY|' +
+  '(Г)+=G' + a.SOFT + '|' +
   '(Г)=G|' +
-  // --- Д -----------------------------------------------------------------
+  // Д
   // здн -> зн, рдц -> рц
   'З(Д)Н=|' +
   'Р(Д)Ц=|' +
-  '(Д)Ь =TY|' +
+  '(Д)Ь =T' + a.SOFT + '|' +
   '(Д)@ =T|' +
   '(Д) =T|' +
   '(Д).=T|' +
-  '(Д)+=DY|' +
+  '(Д)+=D' + a.SOFT + '|' +
   '(Д)=D|' +
-  // --- Е -----------------------------------------------------------------
+  // Е
   '&(Е)\'=EH4|' +
   '&(Е)=EH|' +
   'Ь(Е)\'=EH4|' +
@@ -268,134 +231,134 @@ export const rules =
   '\':(Е)=IH|' +
   '(Е):#\'=IH|' +
   '(Е)=EH|' +
-  // --- Ё -----------------------------------------------------------------
+  // Ё
   'Ь(Ё)=OH4|' +
   'Ъ(Ё)=OH4|' +
   ' (Ё)=YOH4|' +
   '#\'(Ё)=YOH4|' +
   '#(Ё)=YOH4|' +
   '(Ё)=OH4|' +
-  // --- Ж -----------------------------------------------------------------
+  // Ж
   '(Ж)@ =SH|' +
   '(Ж) =SH|' +
   '(Ж).=SH|' +
   '(Ж)=ZH|' +
-  // --- З -----------------------------------------------------------------
-  '(З)Ь =SY|' +
+  // З
+  '(З)Ь =S' + a.SOFT + '|' +
   '(З)@ =S|' +
   '(З) =S|' +
   '(З).=S|' +
-  '(З)+=ZY|' +
+  '(З)+=Z' + a.SOFT + '|' +
   '(З)=Z|' +
-  // --- И -----------------------------------------------------------------
-  '&(И)\'=' + Y + '4|' +
-  '&(И)=' + Y + '|' +
+  // И
+  '&(И)\'=' + a.YERY + '4|' +
+  '&(И)=' + a.YERY + '|' +
   '(И)\'=IY4|' +
   '(И)=IH|' +
-  // --- Й -----------------------------------------------------------------
+  // Й
   '(Й)=Y|' +
-  // --- К -----------------------------------------------------------------
+  // К
   '(К)@=G|' +
-  '(К)+=KY|' +
+  '(К)+=K' + a.SOFT + '|' +
   '(К)=K|' +
-  // --- Л -----------------------------------------------------------------
-  // солнце, сердце - л drops out of -лнц-
+  // Л
+  // л drops out of -лнц- (солнце)
   '(Л)НЦ=|' +
-  '(Л)+=LY|' +
+  '(Л)+=L' + a.SOFT + '|' +
   '(Л)=L|' +
-  // --- М -----------------------------------------------------------------
-  '(М)+=MY|' +
+  // М
+  '(М)+=M' + a.SOFT + '|' +
   '(М)=M|' +
-  // --- Н -----------------------------------------------------------------
+  // Н
   '(Н)К=NX|' +
   '(Н)Г=NX|' +
-  '(Н)+=NY|' +
+  '(Н)+=N' + a.SOFT + '|' +
   '(Н)=N|' +
-  // --- О -----------------------------------------------------------------
+  // О
   '(О)\'=OH4|' +
   '(О):#:#\'=AX|' +
   '(О):#\'=AH|' +
   '\':(О)=AX|' +
   '\':#:(О)=AX|' +
   '(О)=OH|' +
-  // --- П -----------------------------------------------------------------
+  // П
   '(П)@=B|' +
-  '(П)+=PY|' +
+  '(П)+=P' + a.SOFT + '|' +
   '(П)=P|' +
-  // --- Р -----------------------------------------------------------------
-  '(Р)+=' + R + 'Y|' +
-  '(Р)=' + R + '|' +
-  // --- С -----------------------------------------------------------------
+  // Р
+  '(Р)+=' + a.R + a.SOFT + '|' +
+  '(Р)=' + a.R + '|' +
+  // С
   '(С)Ч=SH|' +
   '(С)Ш=SH|' +
   '(С)Ж=ZH|' +
-  '(С)Ь =SY|' +
+  '(С)Ь =S' + a.SOFT + '|' +
   '(С)@=Z|' +
-  '(С)+=SY|' +
+  '(С)+=S' + a.SOFT + '|' +
   '(С)=S|' +
-  // --- Т -----------------------------------------------------------------
-  // Reflexive -тся / -ться are spoken -цца.
+  // Т
+  // -тся / -ться are spoken -цца.
   '(ТЬСЯ) =TSAX|' +
   '(ТСЯ) =TSAX|' +
   // стн -> сн, стл -> сл
   'С(Т)Н=|' +
   'С(Т)Л=|' +
-  '(Т)Ь =TY|' +
+  '(Т)Ь =T' + a.SOFT + '|' +
   '(Т)@=D|' +
-  '(Т)+=TY|' +
+  '(Т)+=T' + a.SOFT + '|' +
   '(Т)=T|' +
-  // --- У -----------------------------------------------------------------
-  '(У)\'=UW4|' +
+  // У
+  '(У)\'=' + a.U + '4|' +
   '\':(У)=UH|' +
   '(У):#\'=UH|' +
-  '(У)=UW|' +
-  // --- Ф -----------------------------------------------------------------
-  '(Ф)+=FY|' +
+  '(У)=' + a.U + '|' +
+  // Ф
+  '(Ф)+=F' + a.SOFT + '|' +
   '(Ф)=F|' +
-  // --- Х -----------------------------------------------------------------
-  '(Х)+=' + H + 'Y|' +
-  '(Х)=' + H + '|' +
-  // --- Ц -----------------------------------------------------------------
+  // Х
+  '(Х)+=' + a.KH + a.SOFT + '|' +
+  '(Х)=' + a.KH + '|' +
+  // Ц
   '(Ц)=TS|' +
-  // --- Ч -----------------------------------------------------------------
+  // Ч
   ' (ЧТОБ)=SHTOH4B|' +
   ' (ЧТО)=SHTOH4|' +
   'КОНЕ(ЧН)О=SHN|' +
   '(Ч)=CH|' +
-  // --- Ш -----------------------------------------------------------------
+  // Ш
   '(Ш)=SH|' +
-  // --- Щ -----------------------------------------------------------------
-  '(Щ)=' + Q + '|' +
-  // --- Ъ -----------------------------------------------------------------
+  // Щ
+  '(Щ)=' + a.SHCH + '|' +
+  // Ъ
   '(Ъ)#=Y|' +
   '(Ъ)=|' +
-  // --- Ы -----------------------------------------------------------------
-  '(Ы)\'=' + Y + '4|' +
-  '(Ы)=' + Y + '|' +
-  // --- Ь -----------------------------------------------------------------
+  // Ы
+  '(Ы)\'=' + a.YERY + '4|' +
+  '(Ы)=' + a.YERY + '|' +
+  // Ь
   '(Ь)=|' +
-  // --- Э -----------------------------------------------------------------
+  // Э
   '(Э)\'=EH4|' +
   '(Э)=EH|' +
-  // --- Ю -----------------------------------------------------------------
-  'Ь(Ю)\'=UW4|' +
+  // Ю
+  'Ь(Ю)\'=' + a.U + '4|' +
   'Ь(Ю):#\'=UH|' +
-  'Ь(Ю)=UW|' +
-  'Ъ(Ю)\'=UW4|' +
+  'Ь(Ю)=' + a.U + '|' +
+  'Ъ(Ю)\'=' + a.U + '4|' +
   'Ъ(Ю):#\'=UH|' +
-  'Ъ(Ю)=UW|' +
-  ' (Ю)\'=YUW4|' +
+  'Ъ(Ю)=' + a.U + '|' +
+  ' (Ю)\'=Y' + a.U + '4|' +
   ' (Ю):#\'=YUH|' +
-  ' (Ю)=YUW|' +
+  ' (Ю)=Y' + a.U + '|' +
   '#\'(Ю)=YUH|' +
-  '#(Ю)\'=YUW4|' +
+  '#(Ю)\'=Y' + a.U + '4|' +
   '#(Ю):#\'=YUH|' +
-  '#(Ю)=YUW|' +
-  '(Ю)\'=UW4|' +
+  '#(Ю)=Y' + a.U + '|' +
+  '(Ю)\'=' + a.U + '4|' +
   '\':(Ю)=UH|' +
   '(Ю):#\'=UH|' +
-  '(Ю)=UW|' +
-  // --- Я -----------------------------------------------------------------
+  '(Ю)=' + a.U + '|' +
+  // Я
   'Ь(Я)\'=AA4|' +
   'Ь(Я):#\'=IH|' +
   'Ь(Я)=AA|' +
@@ -412,24 +375,24 @@ export const rules =
   '#(Я):#\'=YIH|' +
   '#(Я)=YAA|' +
   '(Я)\'=AE4|' +
-  // Unstressed word final -я is far more common than the stressed one
-  // (дядя, время, здания, ...), so it is reduced even without a mark.
+  // Unstressed word final -я is much the commoner case (дядя, время), so it
+  // reduces even without a mark.
   '(Я) =AX|' +
   '\':(Я)=IH|' +
   '(Я):#\'=IH|' +
   '(Я)=AE'
 ;
 
-export const rules2 =
+const buildRules2 = (a) =>
   '(\')=|' +
   '(!)=.|' +
   '(")=|' +
   '(#)= NOHMIHR|' +
-  '($)= DOHLAR|' +
+  '($)= DOHLAAR|' +
   '(%)= PRAHTSEH4NT|' +
   '(&)= IH|' +
   '(*)= ZVYOH4ZDAHCHKAH|' +
-  '(+)= PLYUS|' +
+  '(+)= PLY' + a.U + 'S|' +
   '(,)=,|' +
   ' (-) =-|' +
   '(-)=|' +
@@ -439,7 +402,7 @@ export const rules2 =
   '(1)= AHDIY4N|' +
   '(2)= DVAA4|' +
   '(3)= TRIY4|' +
-  '(4)= CHIH' + Y + '4RYIH|' +
+  '(4)= CHIH' + a.YERY + '4RYIH|' +
   '(5)= PYAE4TY|' +
   '(6)= SHEH4STY|' +
   '(7)= SYEH4MY|' +
@@ -452,3 +415,6 @@ export const rules2 =
   '(@)= SAHBAA4KAH|' +
   '(^)= KRY4SHKAH'
 ;
+
+export const rules = buildRules(TUNE);
+export const rules2 = buildRules2(TUNE);

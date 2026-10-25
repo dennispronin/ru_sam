@@ -8,7 +8,8 @@ import {text2Uint8Array, Uint32ToUint8Array, Uint16ToUint8Array} from '../util/u
  * @return {Promise}
  */
 const Play = (context, audiobuffer) => {
-  let abort;
+  // Defined here so a throw inside the executor still leaves one behind.
+  let abort = () => {};
   let promise = new Promise((resolve, reject) => {
     let source = context.createBufferSource();
     let soundBuffer = context.createBuffer(1, audiobuffer.length, 22050);
@@ -27,7 +28,7 @@ const Play = (context, audiobuffer) => {
     };
     source.start(0);
   });
-  promise.abort = abort;
+  promise.abort = (reason) => abort(reason);
   return promise;
 }
 
@@ -41,6 +42,13 @@ let context = null;
  * @return {Promise}
  */
 export const PlayBuffer = (audiobuffer) => {
+  if (!audiobuffer || !audiobuffer.length) {
+    const rejected = Promise.reject(new Error('Nothing to play.'));
+    rejected.abort = () => {};
+
+    return rejected;
+  }
+
   if (null === context) {
     context = new AudioContext();
   }
@@ -131,6 +139,10 @@ export const ToWavBuffer = (audiobuffer) => {
  * @return void
  */
 export const RenderBuffer = (audiobuffer) => {
+  if (!audiobuffer || !audiobuffer.length) {
+    return false;
+  }
+
   const filename = "sam.wav";
 
   const blob = new Blob([ToWavBuffer(audiobuffer)], { type: "audio/vnd.wave" });
@@ -145,4 +157,6 @@ export const RenderBuffer = (audiobuffer) => {
   a.click();
   document.body.removeChild(a);
   url.revokeObjectURL(fileURL);
+
+  return true;
 }
